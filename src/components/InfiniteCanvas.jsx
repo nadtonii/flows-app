@@ -476,7 +476,7 @@ export default function InfiniteCanvas() {
           width: '100%',
           height: '100%',
           display: 'block',
-          background: '#f7f7f7',
+          background: '#ffffff',
           cursor:
             spaceHeld && editingCardId === null
               ? 'grab'
@@ -542,24 +542,18 @@ function drawGrid(ctx, rect, { pan, scale }) {
 
   const columns = Math.ceil(rect.width / scaledSpacing) + 3;
   const rows = Math.ceil(rect.height / scaledSpacing) + 3;
+  const dotRadius = Math.max(1, 1.5 * scale);
 
-  ctx.strokeStyle = 'rgba(17, 17, 17, 0.05)';
-  ctx.lineWidth = 1;
+  ctx.fillStyle = '#d1d5db';
 
   for (let i = 0; i < columns; i += 1) {
     const x = i * scaledSpacing;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, rect.height + scaledSpacing * 2);
-    ctx.stroke();
-  }
-
-  for (let j = 0; j < rows; j += 1) {
-    const y = j * scaledSpacing;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(rect.width + scaledSpacing * 2, y);
-    ctx.stroke();
+    for (let j = 0; j < rows; j += 1) {
+      const y = j * scaledSpacing;
+      ctx.beginPath();
+      ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   ctx.restore();
