@@ -521,7 +521,7 @@ export default function InfiniteCanvas() {
         />
       )}
 
-      <PillNavigation onAddCard={addCard} />
+      <PillNavigation />
     </div>
   );
 }
