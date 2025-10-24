@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
@@ -50,10 +57,12 @@ export default function InfiniteCanvas() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [interactionType, setInteractionType] = useState('idle');
+  const [editingPadding, setEditingPadding] = useState(0);
 
   const cardsRef = useRef(cards);
   const panRef = useRef(pan);
   const scaleRef = useRef(scale);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     cardsRef.current = cards;
@@ -446,6 +455,26 @@ export default function InfiniteCanvas() {
     };
   }, [editingCard, pan, scale]);
 
+  useLayoutEffect(() => {
+    if (!editingCard || !textareaPosition) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const available = textareaPosition.height;
+    if (available <= 0) return;
+
+    const previousHeight = textarea.style.height;
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const offset = Math.max(0, (available - scrollHeight) / 2);
+    setEditingPadding((prev) => (prev === offset ? prev : offset));
+    textarea.style.height = `${available}px`;
+
+    return () => {
+      textarea.style.height = previousHeight;
+    };
+  }, [editingCard?.text, scale, textareaPosition?.height, editingCard, textareaPosition]);
+
   const handleCanvasClick = useCallback(() => {
     if (hoveredCardId || interactionType === 'drag' || interactionType === 'resize') {
       return;
@@ -490,6 +519,7 @@ export default function InfiniteCanvas() {
       {editingCard && textareaPosition && (
         <textarea
           key={editingCard.id}
+          ref={textareaRef}
           autoFocus
           value={editingCard.text}
           placeholder="Card"
@@ -515,7 +545,11 @@ export default function InfiniteCanvas() {
             whiteSpace: 'pre-wrap',
             lineHeight: '22px',
             outline: 'none',
-            padding: 0,
+            paddingTop: editingPadding,
+            paddingBottom: editingPadding,
+            paddingLeft: 0,
+            paddingRight: 0,
+            overflow: 'hidden',
             zIndex: 10,
           }}
         />
