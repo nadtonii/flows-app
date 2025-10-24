@@ -1,0 +1,79 @@
+.text-toolbar-frame > div {
+  position: relative;
+}
+
+.text-toolbar-actions {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding-inline: 12px;
+  padding-block: 12px;
+  pointer-events: none;
+}
+
+.text-toolbar-button {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 24px 24px;
+}
+
+.text-toolbar-button:hover {
+  background-color: rgba(17, 17, 17, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.08);
+}
+
+.text-toolbar-button[data-active='true'] {
+  background-color: rgba(17, 17, 17, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.2);
+}
+
+.text-toolbar-button[data-format='italic'] {
+  background-image: url('/icons/italic.svg');
+}
+
+.text-toolbar-button[data-format='bold'] {
+  background-image: url('/icons/bold.svg');
+}
+
+.text-toolbar-button[data-format='underline'] {
+  background-image: url('/icons/underline.svg');
+}
+
+.text-toolbar-button[data-format='strikethrough'] {
+  background-image: url('/icons/strikethrough.svg');
+}
+
+.text-toolbar-terminal {
+  pointer-events: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  background: #ffffff;
+}
+
+.text-toolbar-frame > div > div:nth-child(1) > div {
+  background-image: url('/icons/italic.svg') !important;
+}
+
+.text-toolbar-frame > div > div:nth-child(2) {
+  background-image: url('/icons/bold.svg') !important;
+}
+
+.text-toolbar-frame > div > div:nth-child(3) {
+  background-image: url('/icons/underline.svg') !important;
+}
+
+.text-toolbar-frame > div > div:nth-child(4) {
+  background-image: url('/icons/strikethrough.svg') !important;
+}
