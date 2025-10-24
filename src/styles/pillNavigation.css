@@ -1,0 +1,19 @@
+.pill-navigation-frame > div {
+  position: relative;
+}
+
+.pill-navigation-frame > div > div:nth-child(1) > div {
+  background-image: url('/icons/card.svg') !important;
+}
+
+.pill-navigation-frame > div > div:nth-child(2) > div {
+  background-image: url('/icons/icon2.svg') !important;
+}
+
+.pill-navigation-frame > div > div:nth-child(3) > div > div {
+  background-image: url('/icons/icon3.svg') !important;
+}
+
+.pill-navigation-frame > div > div:nth-child(4) > div > div {
+  background-image: url('/icons/icon4.svg') !important;
+}

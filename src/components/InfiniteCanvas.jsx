@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
   width: 240,
@@ -510,64 +511,7 @@ export default function InfiniteCanvas() {
         />
       )}
 
-      <button
-        type="button"
-        onClick={addCard}
-        title="Add card (C)"
-        aria-label="Add card"
-        style={{
-          position: 'fixed',
-          bottom: 32,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background:
-            'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(17,17,17,0.9))',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 999,
-          padding: '12px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          boxShadow: '0 12px 32px rgba(17, 17, 17, 0.25)',
-          cursor: 'pointer',
-          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.transform = 'translateX(-50%) scale(1.05)';
-          event.currentTarget.style.boxShadow = '0 18px 36px rgba(17, 17, 17, 0.28)';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.transform = 'translateX(-50%) scale(1)';
-          event.currentTarget.style.boxShadow = '0 12px 32px rgba(17, 17, 17, 0.25)';
-        }}
-      >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 32,
-            height: 32,
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.12)',
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>New card</span>
-      </button>
+      <PillNavigation onAddCard={addCard} />
     </div>
   );
 }
