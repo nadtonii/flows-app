@@ -32,8 +32,8 @@ export default function PillNavigation({ onAddCard }) {
           onBlur={() => setIsActive(false)}
           style={{
             position: 'absolute',
-            top: 8,
-            left: 8,
+            top: 28,
+            left: 28,
             width: 40,
             height: 40,
             borderRadius: 9999,
@@ -47,6 +47,7 @@ export default function PillNavigation({ onAddCard }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            transform: 'translate(-50%, -50%)',
           }}
         />
         {showTooltip && (
