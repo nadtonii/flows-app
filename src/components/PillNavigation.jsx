@@ -4,9 +4,10 @@ import '../styles/pillNavigation.css';
 
 export default function PillNavigation({ onAddCard }) {
   const tooltipId = useId();
-  const [isActive, setIsActive] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
-  const showTooltip = isActive;
+  const showTooltip = isHovered || isFocused;
 
   return (
     <div
@@ -20,16 +21,16 @@ export default function PillNavigation({ onAddCard }) {
       }}
     >
       <div className="pill-navigation-frame" style={{ position: 'relative', pointerEvents: 'auto' }}>
-        <Frame />
+        <Frame dimFirstIcon={isHovered} />
         <button
           type="button"
           aria-label="Add card"
           aria-describedby={showTooltip ? tooltipId : undefined}
           onClick={onAddCard}
-          onMouseEnter={() => setIsActive(true)}
-          onMouseLeave={() => setIsActive(false)}
-          onFocus={() => setIsActive(true)}
-          onBlur={() => setIsActive(false)}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
           style={{
             position: 'absolute',
             top: 28,
@@ -38,12 +39,12 @@ export default function PillNavigation({ onAddCard }) {
             height: 40,
             borderRadius: 9999,
             border: 'none',
-            backgroundColor: isActive ? 'rgba(255, 255, 255, 0.18)' : 'transparent',
+            backgroundColor: 'transparent',
             cursor: 'pointer',
             padding: 0,
             outline: 'none',
-            boxShadow: isActive ? '0 0 0 2px rgba(255, 255, 255, 0.35)' : 'none',
-            transition: 'background-color 150ms ease, box-shadow 150ms ease',
+            boxShadow: isFocused ? '0 0 0 2px rgba(255, 255, 255, 0.35)' : 'none',
+            transition: 'box-shadow 150ms ease',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

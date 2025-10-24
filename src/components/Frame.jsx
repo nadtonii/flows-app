@@ -3,7 +3,7 @@
  * https://app.paper.design/file/01K8C2AWB4W9CQNM1MJTEDT33R?node=01K8C4KEVXDD52KJ3WAE600SA6
  * on Oct 25, 2025 at 12:41 AM.
  */
-export default function Frame() {
+export default function Frame({ dimFirstIcon = false }) {
   return (
     <div
       style={{
@@ -60,6 +60,8 @@ export default function Frame() {
             position: 'relative',
             transformOrigin: '50% 50%',
             width: '24px',
+            filter: dimFirstIcon ? 'brightness(0.65)' : 'none',
+            transition: 'filter 150ms ease',
           }}
         />
       </div>
