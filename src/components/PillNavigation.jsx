@@ -33,9 +33,9 @@ export default function PillNavigation({ onAddCard }) {
           style={{
             position: 'absolute',
             top: 8,
-            left: 12,
-            width: 24,
-            height: 24,
+            left: 8,
+            width: 40,
+            height: 40,
             borderRadius: 9999,
             border: 'none',
             backgroundColor: isActive ? 'rgba(255, 255, 255, 0.18)' : 'transparent',
@@ -56,7 +56,7 @@ export default function PillNavigation({ onAddCard }) {
             style={{
               position: 'absolute',
               bottom: 'calc(100% + 8px)',
-              left: 24,
+              left: 28,
               transform: 'translateX(-50%)',
               backgroundColor: '#ffffff',
               color: '#111111',
