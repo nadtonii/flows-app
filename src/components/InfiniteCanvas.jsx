@@ -1,0 +1,654 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+const DEFAULT_CARD = {
+  width: 240,
+  height: 140,
+};
+
+const MIN_CARD_WIDTH = 120;
+const MIN_CARD_HEIGHT = 80;
+const MAX_CARD_HEIGHT = 480;
+const HANDLE_SIZE = 18;
+const MIN_SCALE = 0.4;
+const MAX_SCALE = 2.5;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function createCard({ x, y }) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    x,
+    y,
+    width: DEFAULT_CARD.width,
+    height: DEFAULT_CARD.height,
+    text: '',
+    isPlaceholder: true,
+  };
+}
+
+export default function InfiniteCanvas() {
+  const canvasRef = useRef(null);
+  const interactionRef = useRef({ type: 'idle' });
+
+  const [cards, setCards] = useState([]);
+  const [activeCardId, setActiveCardId] = useState(null);
+  const [editingCardId, setEditingCardId] = useState(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [interactionType, setInteractionType] = useState('idle');
+
+  const cardsRef = useRef(cards);
+  const panRef = useRef(pan);
+  const scaleRef = useRef(scale);
+
+  useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
+
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  const addCard = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const viewportCenter = {
+      x: (rect.width / 2 - panRef.current.x) / scaleRef.current,
+      y: (rect.height / 2 - panRef.current.y) / scaleRef.current,
+    };
+
+    const newCard = createCard({
+      x: viewportCenter.x - DEFAULT_CARD.width / 2,
+      y: viewportCenter.y - DEFAULT_CARD.height / 2,
+    });
+
+    setCards((prev) => [...prev, newCard]);
+    setActiveCardId(newCard.id);
+    setEditingCardId(newCard.id);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.code === 'Space' && editingCardId === null) {
+        event.preventDefault();
+        setSpaceHeld(true);
+      }
+
+      if (editingCardId !== null) return;
+
+      if (event.key.toLowerCase() === 'c') {
+        addCard();
+      }
+
+      if (event.key === 'Backspace' && activeCardId) {
+        setCards((prev) => prev.filter((card) => card.id !== activeCardId));
+        setActiveCardId(null);
+        setEditingCardId((value) => (value === activeCardId ? null : value));
+      }
+    };
+
+    const handleKeyUp = (event) => {
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setSpaceHeld(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [activeCardId, addCard, editingCardId]);
+
+  const toWorldSpace = useCallback((event) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left - panRef.current.x) / scaleRef.current,
+      y: (event.clientY - rect.top - panRef.current.y) / scaleRef.current,
+    };
+  }, []);
+
+  const setInteraction = useCallback((interaction) => {
+    interactionRef.current = interaction;
+    setInteractionType(interaction.type);
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (event) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      canvas.setPointerCapture?.(event.pointerId);
+
+      if (spaceHeld && editingCardId === null) {
+        setInteraction({
+          type: 'pan',
+          pointerId: event.pointerId,
+          origin: { x: event.clientX, y: event.clientY },
+          start: { ...panRef.current },
+        });
+        return;
+      }
+
+      const pointer = toWorldSpace(event);
+      const reversed = [...cardsRef.current].reverse();
+      let foundCard = null;
+
+      for (const card of reversed) {
+        const withinCard =
+          pointer.x >= card.x &&
+          pointer.x <= card.x + card.width &&
+          pointer.y >= card.y &&
+          pointer.y <= card.y + card.height;
+
+        if (!withinCard) continue;
+
+        const distanceToHandle = Math.hypot(
+          pointer.x - (card.x + card.width),
+          pointer.y - (card.y + card.height)
+        );
+
+        setActiveCardId(card.id);
+        setEditingCardId((value) => (value === card.id ? value : null));
+
+        setCards((prev) => {
+          const index = prev.findIndex((item) => item.id === card.id);
+          if (index === -1 || index === prev.length - 1) {
+            return prev;
+          }
+          const next = [...prev];
+          const [picked] = next.splice(index, 1);
+          next.push(picked);
+          return next;
+        });
+
+        if (distanceToHandle <= HANDLE_SIZE / scaleRef.current) {
+          setInteraction({
+            type: 'resize',
+            pointerId: event.pointerId,
+            cardId: card.id,
+            startPointer: pointer,
+            startSize: { width: card.width, height: card.height },
+          });
+          foundCard = card;
+          break;
+        }
+
+        setInteraction({
+          type: 'drag',
+          pointerId: event.pointerId,
+          cardId: card.id,
+          offset: { x: pointer.x - card.x, y: pointer.y - card.y },
+        });
+        foundCard = card;
+        break;
+      }
+
+      if (!foundCard) {
+        setActiveCardId(null);
+        setInteraction({ type: 'idle' });
+      }
+    },
+    [editingCardId, setInteraction, spaceHeld, toWorldSpace]
+  );
+
+  const handlePointerMove = useCallback(
+    (event) => {
+      const interaction = interactionRef.current;
+      if (!interaction || interaction.type === 'idle') return;
+
+      const pointer = toWorldSpace(event);
+
+      if (interaction.type === 'pan') {
+        const deltaX = event.clientX - interaction.origin.x;
+        const deltaY = event.clientY - interaction.origin.y;
+        setPan({
+          x: interaction.start.x + deltaX,
+          y: interaction.start.y + deltaY,
+        });
+        return;
+      }
+
+      if (interaction.type === 'drag') {
+        setCards((prev) =>
+          prev.map((card) =>
+            card.id === interaction.cardId
+              ? {
+                  ...card,
+                  x: pointer.x - interaction.offset.x,
+                  y: pointer.y - interaction.offset.y,
+                }
+              : card
+          )
+        );
+        return;
+      }
+
+      if (interaction.type === 'resize') {
+        setCards((prev) =>
+          prev.map((card) =>
+            card.id === interaction.cardId
+              ? {
+                  ...card,
+                  width: clamp(
+                    interaction.startSize.width + (pointer.x - interaction.startPointer.x),
+                    MIN_CARD_WIDTH,
+                    Number.POSITIVE_INFINITY
+                  ),
+                  height: clamp(
+                    interaction.startSize.height + (pointer.y - interaction.startPointer.y),
+                    MIN_CARD_HEIGHT,
+                    MAX_CARD_HEIGHT
+                  ),
+                }
+              : card
+          )
+        );
+      }
+    },
+    [toWorldSpace]
+  );
+
+  const clearInteraction = useCallback(() => {
+    setInteraction({ type: 'idle' });
+  }, [setInteraction]);
+
+  const handlePointerUp = useCallback(
+    (event) => {
+      if (event?.pointerId != null) {
+        canvasRef.current?.releasePointerCapture?.(event.pointerId);
+      }
+      clearInteraction();
+    },
+    [clearInteraction]
+  );
+
+  const handleDoubleClick = useCallback(
+    (event) => {
+      const pointer = toWorldSpace(event);
+      for (const card of cardsRef.current) {
+        const withinCard =
+          pointer.x >= card.x &&
+          pointer.x <= card.x + card.width &&
+          pointer.y >= card.y &&
+          pointer.y <= card.y + card.height;
+
+        if (withinCard) {
+          setActiveCardId(card.id);
+          setEditingCardId(card.id);
+          return;
+        }
+      }
+    },
+    [toWorldSpace]
+  );
+
+  const handleWheel = useCallback(
+    (event) => {
+      event.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const pointerX = (event.clientX - rect.left - panRef.current.x) / scaleRef.current;
+      const pointerY = (event.clientY - rect.top - panRef.current.y) / scaleRef.current;
+
+      const scaleIntensity = Math.exp(-event.deltaY / 400);
+      const nextScale = clamp(scaleRef.current * scaleIntensity, MIN_SCALE, MAX_SCALE);
+      const newPan = {
+        x: event.clientX - rect.left - pointerX * nextScale,
+        y: event.clientY - rect.top - pointerY * nextScale,
+      };
+
+      setPan(newPan);
+      setScale(nextScale);
+    },
+    []
+  );
+
+  const editingCard = useMemo(
+    () => cards.find((card) => card.id === editingCardId) ?? null,
+    [cards, editingCardId]
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      draw(rect);
+    };
+
+    const draw = (rect) => {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      ctx.fillStyle = '#f7f7f7';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+
+      drawGrid(ctx, rect, { pan, scale });
+
+      ctx.translate(pan.x, pan.y);
+      ctx.scale(scale, scale);
+
+      for (const card of cards) {
+        drawCard(ctx, card, card.id === activeCardId, card.id === editingCardId);
+      }
+
+      ctx.restore();
+    };
+
+    resize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(resize);
+      observer.observe(canvas);
+
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', resize);
+    return () => {
+      window.removeEventListener('resize', resize);
+    };
+  }, [cards, activeCardId, editingCardId, pan, scale]);
+
+  const handleTextChange = useCallback(
+    (event) => {
+      const value = event.target.value;
+      const approxLines = value.split('\n').length + Math.floor(value.length / 28);
+      const desiredHeight = clamp(approxLines * 22 + 48, MIN_CARD_HEIGHT, MAX_CARD_HEIGHT);
+
+      setCards((prev) =>
+        prev.map((card) =>
+          card.id === editingCardId
+            ? {
+                ...card,
+                text: value,
+                isPlaceholder: value.trim().length === 0,
+                height: desiredHeight,
+              }
+            : card
+        )
+      );
+    },
+    [editingCardId]
+  );
+
+  const textareaPosition = useMemo(() => {
+    if (!editingCard) return null;
+    return {
+      top: editingCard.y * scale + pan.y + 16,
+      left: editingCard.x * scale + pan.x + 16,
+      width: editingCard.width * scale - 32,
+      height: Math.max(48, editingCard.height * scale - 32),
+    };
+  }, [editingCard, pan, scale]);
+
+  const handleCanvasClick = useCallback(() => {
+    if (interactionType !== 'drag' && interactionType !== 'resize') {
+      setActiveCardId(null);
+    }
+  }, [interactionType]);
+
+  return (
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
+        onClick={handleCanvasClick}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          background: '#f7f7f7',
+          cursor:
+            spaceHeld && editingCardId === null
+              ? 'grab'
+              : interactionType === 'pan'
+              ? 'grabbing'
+              : 'default',
+          touchAction: 'none',
+        }}
+      />
+
+      {editingCard && textareaPosition && (
+        <textarea
+          key={editingCard.id}
+          autoFocus
+          value={editingCard.text}
+          placeholder="Card"
+          onChange={handleTextChange}
+          onBlur={() => setEditingCardId(null)}
+          aria-label="Edit card"
+          style={{
+            position: 'absolute',
+            top: textareaPosition.top,
+            left: textareaPosition.left,
+            width: textareaPosition.width,
+            height: textareaPosition.height,
+            fontSize: 16,
+            fontWeight: 600,
+            fontFamily: 'Inter, sans-serif',
+            textAlign: 'center',
+            border: 'none',
+            background: 'transparent',
+            color: editingCard.text ? '#111' : '#999',
+            resize: 'none',
+            overflowWrap: 'break-word',
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-wrap',
+            lineHeight: '22px',
+            outline: 'none',
+            padding: 0,
+            zIndex: 10,
+          }}
+        />
+      )}
+
+      <button
+        type="button"
+        onClick={addCard}
+        title="Add card (C)"
+        aria-label="Add card"
+        style={{
+          position: 'fixed',
+          bottom: 32,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background:
+            'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(17,17,17,0.9))',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 999,
+          padding: '12px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          boxShadow: '0 12px 32px rgba(17, 17, 17, 0.25)',
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.transform = 'translateX(-50%) scale(1.05)';
+          event.currentTarget.style.boxShadow = '0 18px 36px rgba(17, 17, 17, 0.28)';
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.transform = 'translateX(-50%) scale(1)';
+          event.currentTarget.style.boxShadow = '0 12px 32px rgba(17, 17, 17, 0.25)';
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            borderRadius: '999px',
+            background: 'rgba(255,255,255,0.12)',
+          }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>New card</span>
+      </button>
+    </div>
+  );
+}
+
+function drawGrid(ctx, rect, { pan, scale }) {
+  const gridSpacing = 80;
+  const scaledSpacing = gridSpacing * scale;
+
+  if (scaledSpacing < 12) {
+    return;
+  }
+
+  const offsetX = (pan.x % scaledSpacing) - scaledSpacing;
+  const offsetY = (pan.y % scaledSpacing) - scaledSpacing;
+
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+
+  const columns = Math.ceil(rect.width / scaledSpacing) + 3;
+  const rows = Math.ceil(rect.height / scaledSpacing) + 3;
+
+  ctx.strokeStyle = 'rgba(17, 17, 17, 0.05)';
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < columns; i += 1) {
+    const x = i * scaledSpacing;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, rect.height + scaledSpacing * 2);
+    ctx.stroke();
+  }
+
+  for (let j = 0; j < rows; j += 1) {
+    const y = j * scaledSpacing;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(rect.width + scaledSpacing * 2, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawCard(ctx, card, isActive, isEditing) {
+  const radius = 18;
+  const { x, y, width, height } = card;
+
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = isActive ? '#111' : 'rgba(17, 17, 17, 0.12)';
+  ctx.lineWidth = isActive ? 2 : 1;
+
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  if (!isEditing) {
+    ctx.save();
+    ctx.fillStyle = card.isPlaceholder ? '#9ca3af' : '#111';
+    ctx.font = '600 16px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const padding = 24;
+    const maxWidth = width - padding * 2;
+    const words = (card.text || 'Card').split(/\s+/);
+    const lines = [];
+    let current = '';
+
+    words.forEach((word) => {
+      const testLine = current ? `${current} ${word}` : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = testLine;
+      }
+    });
+
+    if (current) {
+      lines.push(current);
+    }
+
+    const lineHeight = 22;
+    const totalHeight = lineHeight * lines.length;
+    const startY = y + height / 2 - totalHeight / 2 + lineHeight / 2;
+
+    lines.forEach((line, index) => {
+      ctx.fillText(line, x + width / 2, startY + index * lineHeight);
+    });
+
+    ctx.restore();
+  }
+
+  if (isActive) {
+    ctx.save();
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(x + width, y + height, HANDLE_SIZE / 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
