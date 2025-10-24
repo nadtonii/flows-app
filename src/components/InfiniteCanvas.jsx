@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
   width: 240,
@@ -35,6 +36,7 @@ export default function InfiniteCanvas() {
   const [cards, setCards] = useState([]);
   const [activeCardId, setActiveCardId] = useState(null);
   const [editingCardId, setEditingCardId] = useState(null);
+  const [hoveredCardId, setHoveredCardId] = useState(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -56,6 +58,12 @@ export default function InfiniteCanvas() {
     scaleRef.current = scale;
   }, [scale]);
 
+  useEffect(() => {
+    if (spaceHeld) {
+      setHoveredCardId(null);
+    }
+  }, [spaceHeld]);
+
   const addCard = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -72,7 +80,6 @@ export default function InfiniteCanvas() {
 
     setCards((prev) => [...prev, newCard]);
     setActiveCardId(newCard.id);
-    setEditingCardId(newCard.id);
   }, []);
 
   useEffect(() => {
@@ -85,6 +92,7 @@ export default function InfiniteCanvas() {
       if (editingCardId !== null) return;
 
       if (event.key.toLowerCase() === 'c') {
+        event.preventDefault();
         addCard();
       }
 
@@ -92,6 +100,7 @@ export default function InfiniteCanvas() {
         setCards((prev) => prev.filter((card) => card.id !== activeCardId));
         setActiveCardId(null);
         setEditingCardId((value) => (value === activeCardId ? null : value));
+        setHoveredCardId((value) => (value === activeCardId ? null : value));
       }
     };
 
@@ -124,6 +133,23 @@ export default function InfiniteCanvas() {
     setInteractionType(interaction.type);
   }, []);
 
+  const findCardAtPoint = useCallback((pointer) => {
+    const reversed = [...cardsRef.current].reverse();
+    for (const card of reversed) {
+      const withinCard =
+        pointer.x >= card.x &&
+        pointer.x <= card.x + card.width &&
+        pointer.y >= card.y &&
+        pointer.y <= card.y + card.height;
+
+      if (withinCard) {
+        return card;
+      }
+    }
+
+    return null;
+  }, []);
+
   const handlePointerDown = useCallback(
     (event) => {
       const canvas = canvasRef.current;
@@ -142,73 +168,73 @@ export default function InfiniteCanvas() {
       }
 
       const pointer = toWorldSpace(event);
-      const reversed = [...cardsRef.current].reverse();
-      let foundCard = null;
+      const card = findCardAtPoint(pointer);
 
-      for (const card of reversed) {
-        const withinCard =
-          pointer.x >= card.x &&
-          pointer.x <= card.x + card.width &&
-          pointer.y >= card.y &&
-          pointer.y <= card.y + card.height;
+      if (!card) {
+        setActiveCardId(null);
+        setHoveredCardId(null);
+        setInteraction({ type: 'idle' });
+        return;
+      }
 
-        if (!withinCard) continue;
+      setHoveredCardId(card.id);
+      const distanceToHandle = Math.hypot(
+        pointer.x - (card.x + card.width),
+        pointer.y - (card.y + card.height)
+      );
 
-        const distanceToHandle = Math.hypot(
-          pointer.x - (card.x + card.width),
-          pointer.y - (card.y + card.height)
-        );
+      setActiveCardId(card.id);
+      setEditingCardId((value) => (value === card.id ? value : null));
 
-        setActiveCardId(card.id);
-        setEditingCardId((value) => (value === card.id ? value : null));
-
-        setCards((prev) => {
-          const index = prev.findIndex((item) => item.id === card.id);
-          if (index === -1 || index === prev.length - 1) {
-            return prev;
-          }
-          const next = [...prev];
-          const [picked] = next.splice(index, 1);
-          next.push(picked);
-          return next;
-        });
-
-        if (distanceToHandle <= HANDLE_SIZE / scaleRef.current) {
-          setInteraction({
-            type: 'resize',
-            pointerId: event.pointerId,
-            cardId: card.id,
-            startPointer: pointer,
-            startSize: { width: card.width, height: card.height },
-          });
-          foundCard = card;
-          break;
+      setCards((prev) => {
+        const index = prev.findIndex((item) => item.id === card.id);
+        if (index === -1 || index === prev.length - 1) {
+          return prev;
         }
+        const next = [...prev];
+        const [picked] = next.splice(index, 1);
+        next.push(picked);
+        return next;
+      });
 
+      if (distanceToHandle <= HANDLE_SIZE / scaleRef.current) {
         setInteraction({
-          type: 'drag',
+          type: 'resize',
           pointerId: event.pointerId,
           cardId: card.id,
-          offset: { x: pointer.x - card.x, y: pointer.y - card.y },
+          startPointer: pointer,
+          startSize: { width: card.width, height: card.height },
         });
-        foundCard = card;
-        break;
+        return;
       }
 
-      if (!foundCard) {
-        setActiveCardId(null);
-        setInteraction({ type: 'idle' });
-      }
+      setInteraction({
+        type: 'drag',
+        pointerId: event.pointerId,
+        cardId: card.id,
+        offset: { x: pointer.x - card.x, y: pointer.y - card.y },
+      });
     },
-    [editingCardId, setInteraction, spaceHeld, toWorldSpace]
+    [editingCardId, findCardAtPoint, setInteraction, spaceHeld, toWorldSpace]
   );
 
   const handlePointerMove = useCallback(
     (event) => {
       const interaction = interactionRef.current;
-      if (!interaction || interaction.type === 'idle') return;
 
       const pointer = toWorldSpace(event);
+
+      if (!spaceHeld) {
+        const hoveredCard = findCardAtPoint(pointer);
+        setHoveredCardId((prev) => {
+          const nextId = hoveredCard ? hoveredCard.id : null;
+          return prev === nextId ? prev : nextId;
+        });
+      }
+
+      if (!interaction || interaction.type === 'idle') {
+        return;
+      }
 
       if (interaction.type === 'pan') {
         const deltaX = event.clientX - interaction.origin.x;
@@ -257,7 +283,7 @@ export default function InfiniteCanvas() {
         );
       }
     },
-    [toWorldSpace]
+    [findCardAtPoint, spaceHeld, toWorldSpace]
   );
 
   const clearInteraction = useCallback(() => {
@@ -274,24 +300,25 @@ export default function InfiniteCanvas() {
     [clearInteraction]
   );
 
+  const handlePointerLeave = useCallback(
+    (event) => {
+      handlePointerUp(event);
+      setHoveredCardId(null);
+    },
+    [handlePointerUp]
+  );
+
   const handleDoubleClick = useCallback(
     (event) => {
       const pointer = toWorldSpace(event);
-      for (const card of cardsRef.current) {
-        const withinCard =
-          pointer.x >= card.x &&
-          pointer.x <= card.x + card.width &&
-          pointer.y >= card.y &&
-          pointer.y <= card.y + card.height;
+      const card = findCardAtPoint(pointer);
+      if (!card) return;
 
-        if (withinCard) {
-          setActiveCardId(card.id);
-          setEditingCardId(card.id);
-          return;
-        }
-      }
+      setActiveCardId(card.id);
+      setHoveredCardId(card.id);
+      setEditingCardId(card.id);
     },
-    [toWorldSpace]
+    [findCardAtPoint, toWorldSpace]
   );
 
   const handleWheel = useCallback(
@@ -350,7 +377,11 @@ export default function InfiniteCanvas() {
       ctx.scale(scale, scale);
 
       for (const card of cards) {
-        drawCard(ctx, card, card.id === activeCardId, card.id === editingCardId);
+        drawCard(ctx, card, {
+          isActive: card.id === activeCardId,
+          isEditing: card.id === editingCardId,
+          isHovered: card.id === hoveredCardId,
+        });
       }
 
       ctx.restore();
@@ -371,7 +402,7 @@ export default function InfiniteCanvas() {
     return () => {
       window.removeEventListener('resize', resize);
     };
-  }, [cards, activeCardId, editingCardId, pan, scale]);
+  }, [cards, activeCardId, editingCardId, hoveredCardId, pan, scale]);
 
   const handleTextChange = useCallback(
     (event) => {
@@ -406,10 +437,12 @@ export default function InfiniteCanvas() {
   }, [editingCard, pan, scale]);
 
   const handleCanvasClick = useCallback(() => {
-    if (interactionType !== 'drag' && interactionType !== 'resize') {
-      setActiveCardId(null);
+    if (hoveredCardId || interactionType === 'drag' || interactionType === 'resize') {
+      return;
     }
-  }, [interactionType]);
+
+    setActiveCardId(null);
+  }, [hoveredCardId, interactionType]);
 
   return (
     <div
@@ -425,7 +458,7 @@ export default function InfiniteCanvas() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onClick={handleCanvasClick}
@@ -478,64 +511,7 @@ export default function InfiniteCanvas() {
         />
       )}
 
-      <button
-        type="button"
-        onClick={addCard}
-        title="Add card (C)"
-        aria-label="Add card"
-        style={{
-          position: 'fixed',
-          bottom: 32,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background:
-            'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(17,17,17,0.9))',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 999,
-          padding: '12px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          boxShadow: '0 12px 32px rgba(17, 17, 17, 0.25)',
-          cursor: 'pointer',
-          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.transform = 'translateX(-50%) scale(1.05)';
-          event.currentTarget.style.boxShadow = '0 18px 36px rgba(17, 17, 17, 0.28)';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.transform = 'translateX(-50%) scale(1)';
-          event.currentTarget.style.boxShadow = '0 12px 32px rgba(17, 17, 17, 0.25)';
-        }}
-      >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 32,
-            height: 32,
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.12)',
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>New card</span>
-      </button>
+      <PillNavigation onAddCard={addCard} />
     </div>
   );
 }
@@ -579,7 +555,7 @@ function drawGrid(ctx, rect, { pan, scale }) {
   ctx.restore();
 }
 
-function drawCard(ctx, card, isActive, isEditing) {
+function drawCard(ctx, card, { isActive, isEditing, isHovered }) {
   const radius = 18;
   const { x, y, width, height } = card;
 
@@ -641,7 +617,9 @@ function drawCard(ctx, card, isActive, isEditing) {
     ctx.restore();
   }
 
-  if (isActive) {
+  const shouldShowHandle = isActive || isHovered;
+
+  if (shouldShowHandle) {
     ctx.save();
     ctx.fillStyle = '#111';
     ctx.beginPath();
