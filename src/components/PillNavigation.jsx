@@ -1,6 +1,6 @@
-import Frame from './Frame.jsx';
+import NavigationPill from './NavigationPill.jsx';
 
-export default function PillNavigation() {
+export default function PillNavigation({ onAddCard }) {
   return (
     <div
       style={{
@@ -13,7 +13,7 @@ export default function PillNavigation() {
       }}
     >
       <div style={{ pointerEvents: 'auto' }}>
-        <Frame />
+        <NavigationPill onAddCard={onAddCard} />
       </div>
     </div>
   );
