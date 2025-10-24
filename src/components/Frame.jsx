@@ -1,7 +1,7 @@
 /**
  * Code exported from Paper
  * https://app.paper.design/file/01K8C2AWB4W9CQNM1MJTEDT33R?node=01K8C4KEVXDD52KJ3WAE600SA6
- * on Oct 25, 2025 at 12:41 AM.
+ * on Oct 25, 2025 at 12:50 AM.
  */
 export default function Frame({ dimFirstIcon = false }) {
   return (
@@ -21,7 +21,7 @@ export default function Frame({ dimFirstIcon = false }) {
         paddingBlock: '16px',
         paddingInline: '16px',
         transformOrigin: '0% 0%',
-        width: 'fit-content',
+        width: '242px',
       }}
     >
       <div
