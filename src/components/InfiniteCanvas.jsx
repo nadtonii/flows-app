@@ -10,6 +10,8 @@ const MIN_CARD_WIDTH = 120;
 const MIN_CARD_HEIGHT = 80;
 const MAX_CARD_HEIGHT = 480;
 const HANDLE_SIZE = 18;
+const HANDLE_RADIUS = HANDLE_SIZE / 2;
+const HANDLE_MARGIN = 6;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2.5;
 
@@ -26,6 +28,13 @@ function createCard({ x, y }) {
     height: DEFAULT_CARD.height,
     text: '',
     isPlaceholder: true,
+  };
+}
+
+function getHandleCenter(card) {
+  return {
+    x: card.x + card.width - HANDLE_MARGIN - HANDLE_RADIUS,
+    y: card.y + card.height - HANDLE_MARGIN - HANDLE_RADIUS,
   };
 }
 
@@ -178,9 +187,10 @@ export default function InfiniteCanvas() {
       }
 
       setHoveredCardId(card.id);
+      const handleCenter = getHandleCenter(card);
       const distanceToHandle = Math.hypot(
-        pointer.x - (card.x + card.width),
-        pointer.y - (card.y + card.height)
+        pointer.x - handleCenter.x,
+        pointer.y - handleCenter.y
       );
 
       setActiveCardId(card.id);
@@ -623,7 +633,8 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered }) {
     ctx.save();
     ctx.fillStyle = '#111';
     ctx.beginPath();
-    ctx.arc(x + width, y + height, HANDLE_SIZE / 2.2, 0, Math.PI * 2);
+    const handleCenter = getHandleCenter(card);
+    ctx.arc(handleCenter.x, handleCenter.y, HANDLE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
