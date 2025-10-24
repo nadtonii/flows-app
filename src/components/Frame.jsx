@@ -1,7 +1,7 @@
 /**
  * Code exported from Paper
  * https://app.paper.design/file/01K8C2AWB4W9CQNM1MJTEDT33R?node=01K8C4KEVXDD52KJ3WAE600SA6
- * on Oct 25, 2025 at 12:28 AM.
+ * on Oct 25, 2025 at 12:41 AM.
  */
 export default function Frame() {
   return (
@@ -21,7 +21,7 @@ export default function Frame() {
         paddingBlock: '16px',
         paddingInline: '16px',
         transformOrigin: '0% 0%',
-        width: '251px',
+        width: 'fit-content',
       }}
     >
       <div
@@ -47,7 +47,8 @@ export default function Frame() {
       >
         <div
           style={{
-            backgroundImage: 'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C2XHEW37E8A12D3EP7MM62.svg")',
+            backgroundImage:
+              'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C2XHEW37E8A12D3EP7MM62.svg")',
             backgroundPosition: 'center center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'cover',
@@ -82,7 +83,8 @@ export default function Frame() {
       >
         <div
           style={{
-            backgroundImage: 'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C2TAF4MDWCYJCHWD6KXYW0.svg")',
+            backgroundImage:
+              'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C2TAF4MDWCYJCHWD6KXYW0.svg")',
             backgroundPosition: 'center center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'cover',
@@ -135,7 +137,8 @@ export default function Frame() {
         >
           <div
             style={{
-              backgroundImage: 'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C33G5F1CNHG35WG79G2VDH.svg")',
+              backgroundImage:
+                'url("https://workers.paper.design/file-assets/01K8C2AWB4W9CQNM1MJTEDT33R/01K8C33G5F1CNHG35WG79G2VDH.svg")',
               backgroundPosition: 'center center',
               backgroundRepeat: 'no-repeat',
               backgroundSize: 'cover',
@@ -191,8 +194,10 @@ export default function Frame() {
           }}
         >
           <div
+            imageUrlTemporary="blob:https://app.paper.design/54eb1bf7-67e0-42e7-b2e8-c19619f5e493"
             style={{
-              backgroundImage: 'url("blob:https://app.paper.design/54eb1bf7-67e0-42e7-b2e8-c19619f5e493")',
+              backgroundImage:
+                'url("blob:https://app.paper.design/54eb1bf7-67e0-42e7-b2e8-c19619f5e493")',
               backgroundPosition: 'center center',
               backgroundRepeat: 'no-repeat',
               backgroundSize: 'cover',
