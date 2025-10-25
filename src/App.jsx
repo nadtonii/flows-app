@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import InfiniteCanvas from './components/InfiniteCanvas.jsx';
 import LandingPage from './components/LandingPage.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
+import Favicon from './components/Favicon.jsx';
 
 export default function App() {
   const [isLandingVisible, setIsLandingVisible] = useState(true);
@@ -76,32 +77,35 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app-stage">
-      {showLanding ? (
-        <div
-          className={`app-stage__screen app-stage__screen--landing ${
-            isLandingVisible ? 'app-stage__screen--visible' : 'app-stage__screen--hidden'
-          }`}
-        >
-          <LandingPage onTryItNow={handleTryItNow} />
-        </div>
-      ) : null}
+    <>
+      <Favicon />
+      <div className="app-stage">
+        {showLanding ? (
+          <div
+            className={`app-stage__screen app-stage__screen--landing ${
+              isLandingVisible ? 'app-stage__screen--visible' : 'app-stage__screen--hidden'
+            }`}
+          >
+            <LandingPage onTryItNow={handleTryItNow} />
+          </div>
+        ) : null}
 
-      {showCanvas ? (
-        <div
-          className={`app-stage__screen app-stage__screen--canvas ${
-            isCanvasVisible ? 'app-stage__screen--visible' : 'app-stage__screen--hidden'
-          }`}
-        >
-          <InfiniteCanvas />
-          {shouldRenderOverlay ? (
-            <OnboardingOverlay
-              onExplore={handleExplore}
-              visibility={overlayVisibility}
-            />
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+        {showCanvas ? (
+          <div
+            className={`app-stage__screen app-stage__screen--canvas ${
+              isCanvasVisible ? 'app-stage__screen--visible' : 'app-stage__screen--hidden'
+            }`}
+          >
+            <InfiniteCanvas />
+            {shouldRenderOverlay ? (
+              <OnboardingOverlay
+                onExplore={handleExplore}
+                visibility={overlayVisibility}
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
