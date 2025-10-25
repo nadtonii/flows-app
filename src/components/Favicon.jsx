@@ -4,6 +4,7 @@ import ReactDOMServer from 'react-dom/server';
 function FaviconGraphic() {
   return (
     <div
+      xmlns="http://www.w3.org/1999/xhtml"
       style={{
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
