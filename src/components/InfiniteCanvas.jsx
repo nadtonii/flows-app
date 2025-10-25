@@ -46,7 +46,12 @@ const CONNECTOR_HIT_DISTANCE = 16;
 const CONNECTOR_CAP_RADIUS = 4;
 const CONNECTOR_CARD_OFFSET = 10;
 const CONNECTOR_AUTOROUTE_OFFSET = 48;
+const CONNECTOR_AUTOROUTE_MIN_OFFSET = 24;
 const CONNECTOR_CORNER_RADIUS = 18;
+const CONNECTOR_ARROW_LENGTH = 18;
+const CONNECTOR_ARROW_WIDTH = 7;
+const AUTOROUTE_ORIENTATION_START_FIRST = 'start-first';
+const AUTOROUTE_ORIENTATION_END_FIRST = 'end-first';
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -322,6 +327,7 @@ export default function InfiniteCanvas() {
         },
       },
       bends: [],
+      autoroute: null,
     };
 
     recordSnapshot();
@@ -745,6 +751,7 @@ export default function InfiniteCanvas() {
           source: { cardId: card.id, anchor },
           target: { cardId: null, anchor: null, absolute: pointer },
           bends: [],
+          autoroute: null,
         });
         setSelectedCardIds([]);
         setSelectedConnectorIds([]);
@@ -813,6 +820,27 @@ export default function InfiniteCanvas() {
                   y: pointer.y - bend.y,
                 }
               : { x: 0, y: 0 },
+            hasSnapshot: false,
+          });
+        } else if (connectorHit.type === 'autoroute-corner') {
+          const clone = cloneConnector(connectorHit.connector);
+          const autorouteConfig =
+            cloneAutorouteConfig(connectorHit.autoroute) ?? {
+              startOffset: CONNECTOR_AUTOROUTE_OFFSET,
+              endOffset: CONNECTOR_AUTOROUTE_OFFSET,
+              orientation:
+                connectorHit.autoroute?.orientation ?? AUTOROUTE_ORIENTATION_START_FIRST,
+            };
+          clone.autoroute = autorouteConfig;
+          setDraftConnector({ ...clone, autoroute: autorouteConfig, originId: connectorId });
+          setInteraction({
+            type: 'connector-autoroute-corner',
+            pointerId: event.pointerId,
+            connectorId,
+            offset: connectorHit.corner
+              ? { x: pointer.x - connectorHit.corner.x, y: pointer.y - connectorHit.corner.y }
+              : { x: 0, y: 0 },
+            autoroute: autorouteConfig,
             hasSnapshot: false,
           });
         } else if (connectorHit.type === 'segment') {
@@ -1053,6 +1081,7 @@ export default function InfiniteCanvas() {
             ? { cardId: targetCard.id, anchor }
             : { cardId: null, anchor: null, absolute: pointer },
           bends: [],
+          autoroute: null,
         });
         return;
       }
@@ -1102,6 +1131,50 @@ export default function InfiniteCanvas() {
         } else {
           setDraftConnector(null);
         }
+        return;
+      }
+
+      if (interaction.type === 'connector-autoroute-corner') {
+        prepareHistoryForInteraction();
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (!connector) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const cardMap = new Map();
+        for (const card of cardsRef.current ?? []) {
+          cardMap.set(card.id, card);
+        }
+
+        const start = resolveConnectorEndPosition(connector.source, cardMap);
+        const end = resolveConnectorEndPosition(connector.target, cardMap);
+        if (!start.attached || !end.attached) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const offset = interaction.offset ?? { x: 0, y: 0 };
+        const desiredCorner = { x: pointer.x - offset.x, y: pointer.y - offset.y };
+
+        const autorouted = buildOrthogonalConnectorPoints(start, end, {
+          startOffset: projectDistanceAlongNormal(start.point, start.normal, desiredCorner),
+          endOffset: projectDistanceAlongNormal(end.point, end.normal, desiredCorner),
+          orientation: interaction.autoroute?.orientation,
+          desiredCorner,
+        });
+
+        if (autorouted.points.length < 2) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const clone = cloneConnector(connector);
+        clone.autoroute = cloneAutorouteConfig(autorouted.autoroute);
+
+        setDraftConnector({ ...clone, autoroute: clone.autoroute, originId: connector.id });
         return;
       }
 
@@ -1164,6 +1237,7 @@ export default function InfiniteCanvas() {
               anchor,
             },
             bends: [],
+            autoroute: null,
           };
           recordSnapshot();
           setConnectors((prev) => [...prev, newConnector]);
@@ -1204,6 +1278,7 @@ export default function InfiniteCanvas() {
                     ? {
                         ...item,
                         [endpointKey]: { cardId: targetCard.id, anchor },
+                        autoroute: null,
                       }
                     : item
                 )
@@ -1243,6 +1318,56 @@ export default function InfiniteCanvas() {
         return;
       }
 
+      if (interaction?.type === 'connector-autoroute-corner') {
+        const pointer = toWorldSpace(event);
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (connector) {
+          const cardMap = new Map();
+          for (const card of cardsRef.current ?? []) {
+            cardMap.set(card.id, card);
+          }
+
+          const start = resolveConnectorEndPosition(connector.source, cardMap);
+          const end = resolveConnectorEndPosition(connector.target, cardMap);
+
+          if (start.attached && end.attached) {
+            const offset = interaction.offset ?? { x: 0, y: 0 };
+            const desiredCorner = { x: pointer.x - offset.x, y: pointer.y - offset.y };
+            const baseline = buildOrthogonalConnectorPoints(start, end, connector.autoroute);
+            const autorouted = buildOrthogonalConnectorPoints(start, end, {
+              startOffset: projectDistanceAlongNormal(start.point, start.normal, desiredCorner),
+              endOffset: projectDistanceAlongNormal(end.point, end.normal, desiredCorner),
+              orientation: interaction.autoroute?.orientation,
+              desiredCorner,
+            });
+
+            const nextAutoroute = cloneAutorouteConfig(autorouted.autoroute);
+            const currentAutoroute = cloneAutorouteConfig(baseline.autoroute);
+
+            if (autorouteConfigsDiffer(currentAutoroute, nextAutoroute)) {
+              recordSnapshot();
+              setConnectors((prev) =>
+                prev.map((item) => {
+                  if (item.id !== connector.id) {
+                    return item;
+                  }
+                  return {
+                    ...item,
+                    bends: [],
+                    autoroute: nextAutoroute,
+                  };
+                })
+              );
+            }
+          }
+        }
+
+        clearInteraction();
+        return;
+      }
+
       if (interaction?.type === 'connector-bend') {
         const pointer = toWorldSpace(event);
         const connector = connectorsRef.current.find(
@@ -1271,6 +1396,7 @@ export default function InfiniteCanvas() {
                 return {
                   ...item,
                   bends: existing,
+                  autoroute: null,
                 };
               })
             );
@@ -1858,6 +1984,7 @@ function cloneConnector(connector) {
       source: { cardId: null, anchor: null },
       target: { cardId: null, anchor: null },
       bends: [],
+      autoroute: null,
     };
   }
 
@@ -1885,7 +2012,32 @@ function cloneConnector(connector) {
     bends: Array.isArray(connector.bends)
       ? connector.bends.map((bend) => ({ ...bend }))
       : [],
+    autoroute: cloneAutorouteConfig(connector.autoroute),
   };
+}
+
+function cloneAutorouteConfig(config) {
+  if (!config) {
+    return null;
+  }
+
+  const result = {};
+
+  if (Number.isFinite(config.startOffset)) {
+    result.startOffset = config.startOffset;
+  }
+
+  if (Number.isFinite(config.endOffset)) {
+    result.endOffset = config.endOffset;
+  }
+
+  if (config.orientation === AUTOROUTE_ORIENTATION_END_FIRST) {
+    result.orientation = AUTOROUTE_ORIENTATION_END_FIRST;
+  } else if (config.orientation === AUTOROUTE_ORIENTATION_START_FIRST) {
+    result.orientation = AUTOROUTE_ORIENTATION_START_FIRST;
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function calculateConnectorAnchor(card, point) {
@@ -1985,6 +2137,32 @@ function extendPoint(point, normal, distance) {
   };
 }
 
+function projectDistanceAlongNormal(origin, normal, target) {
+  if (!origin || !normal || !target) {
+    return 0;
+  }
+
+  return (target.x - origin.x) * normal.x + (target.y - origin.y) * normal.y;
+}
+
+function sanitizeAutorouteOffset(value) {
+  if (!Number.isFinite(value)) {
+    return CONNECTOR_AUTOROUTE_OFFSET;
+  }
+
+  return Math.max(CONNECTOR_AUTOROUTE_MIN_OFFSET, Math.abs(value));
+}
+
+function distanceSquared(a, b) {
+  if (!a || !b) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
 function pointsApproximatelyEqual(a, b) {
   if (!a && !b) return true;
   if (!a || !b) return false;
@@ -2001,51 +2179,116 @@ function pushPoint(points, point) {
   }
 }
 
-function buildOrthogonalConnectorPoints(start, end) {
+function buildOrthogonalConnectorPoints(start, end, settings) {
   if (!start?.point || !end?.point) {
-    return [];
+    return { points: [], autoroute: null };
   }
+
+  const autoroute = resolveAutorouteSettings(start, end, settings);
 
   const points = [];
   pushPoint(points, start.point);
-
-  const startExtension = extendPoint(start.point, start.normal, CONNECTOR_AUTOROUTE_OFFSET);
-  const endExtension = extendPoint(end.point, end.normal, CONNECTOR_AUTOROUTE_OFFSET);
-
-  pushPoint(points, startExtension);
-
-  const candidateA = startExtension && endExtension
-    ? { x: startExtension.x, y: endExtension.y }
-    : null;
-  const candidateB = startExtension && endExtension
-    ? { x: endExtension.x, y: startExtension.y }
-    : null;
-
-  let corner = null;
-  if (candidateA && candidateB) {
-    const lengthA =
-      Math.abs(candidateA.x - startExtension.x) +
-      Math.abs(candidateA.y - startExtension.y) +
-      Math.abs(endExtension.x - candidateA.x) +
-      Math.abs(endExtension.y - candidateA.y);
-    const lengthB =
-      Math.abs(candidateB.x - startExtension.x) +
-      Math.abs(candidateB.y - startExtension.y) +
-      Math.abs(endExtension.x - candidateB.x) +
-      Math.abs(endExtension.y - candidateB.y);
-
-    corner = lengthB < lengthA ? candidateB : candidateA;
-  } else if (candidateA) {
-    corner = candidateA;
-  } else if (candidateB) {
-    corner = candidateB;
-  }
-
-  pushPoint(points, corner);
-  pushPoint(points, endExtension);
+  pushPoint(points, autoroute.startExtension);
+  pushPoint(points, autoroute.corner);
+  pushPoint(points, autoroute.endExtension);
   pushPoint(points, end.point);
 
-  return points;
+  return { points, autoroute };
+}
+
+function resolveAutorouteSettings(start, end, settings) {
+  const startOffset = sanitizeAutorouteOffset(settings?.startOffset);
+  const endOffset = sanitizeAutorouteOffset(settings?.endOffset);
+
+  const startExtension = extendPoint(start.point, start.normal, startOffset);
+  const endExtension = extendPoint(end.point, end.normal, endOffset);
+
+  const candidateStartFirst =
+    startExtension && endExtension
+      ? { x: startExtension.x, y: endExtension.y }
+      : null;
+  const candidateEndFirst =
+    startExtension && endExtension
+      ? { x: endExtension.x, y: startExtension.y }
+      : null;
+
+  const lengthStartFirst = candidateStartFirst
+    ? Math.abs(candidateStartFirst.x - startExtension.x) +
+      Math.abs(candidateStartFirst.y - startExtension.y) +
+      Math.abs(endExtension.x - candidateStartFirst.x) +
+      Math.abs(endExtension.y - candidateStartFirst.y)
+    : Number.POSITIVE_INFINITY;
+  const lengthEndFirst = candidateEndFirst
+    ? Math.abs(candidateEndFirst.x - startExtension.x) +
+      Math.abs(candidateEndFirst.y - startExtension.y) +
+      Math.abs(endExtension.x - candidateEndFirst.x) +
+      Math.abs(endExtension.y - candidateEndFirst.y)
+    : Number.POSITIVE_INFINITY;
+
+  let preferredOrientation = null;
+  if (settings?.desiredCorner && candidateStartFirst && candidateEndFirst) {
+    const distanceStart = distanceSquared(settings.desiredCorner, candidateStartFirst);
+    const distanceEnd = distanceSquared(settings.desiredCorner, candidateEndFirst);
+    if (Math.abs(distanceStart - distanceEnd) > 0.01) {
+      preferredOrientation =
+        distanceStart <= distanceEnd
+          ? AUTOROUTE_ORIENTATION_START_FIRST
+          : AUTOROUTE_ORIENTATION_END_FIRST;
+    }
+  }
+
+  let orientation = settings?.orientation;
+  if (preferredOrientation && orientation !== preferredOrientation) {
+    orientation = preferredOrientation;
+  }
+
+  if (
+    orientation !== AUTOROUTE_ORIENTATION_START_FIRST &&
+    orientation !== AUTOROUTE_ORIENTATION_END_FIRST
+  ) {
+    orientation =
+      preferredOrientation ??
+      (lengthStartFirst <= lengthEndFirst
+        ? AUTOROUTE_ORIENTATION_START_FIRST
+        : AUTOROUTE_ORIENTATION_END_FIRST);
+  }
+
+  let corner = null;
+  let resolvedOrientation = orientation;
+  if (orientation === AUTOROUTE_ORIENTATION_END_FIRST) {
+    if (candidateEndFirst) {
+      corner = candidateEndFirst;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_END_FIRST;
+    } else if (candidateStartFirst) {
+      corner = candidateStartFirst;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_START_FIRST;
+    } else {
+      corner = end.point;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_END_FIRST;
+    }
+  } else {
+    if (candidateStartFirst) {
+      corner = candidateStartFirst;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_START_FIRST;
+    } else if (candidateEndFirst) {
+      corner = candidateEndFirst;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_END_FIRST;
+    } else {
+      corner = end.point;
+      resolvedOrientation = AUTOROUTE_ORIENTATION_START_FIRST;
+    }
+  }
+
+  const autoroute = {
+    startOffset,
+    endOffset,
+    orientation: resolvedOrientation,
+    startExtension: startExtension ?? start.point,
+    endExtension: endExtension ?? end.point,
+    corner,
+  };
+
+  return autoroute;
 }
 
 function translateConnector(connector, delta) {
@@ -2125,7 +2368,40 @@ function connectorTranslationChanged(original, translated) {
     }
   }
 
+  if (autorouteConfigsDiffer(original.autoroute, translated.autoroute)) {
+    return true;
+  }
+
   return false;
+}
+
+function autorouteConfigsDiffer(a, b) {
+  if (!a && !b) {
+    return false;
+  }
+
+  if (!a || !b) {
+    return true;
+  }
+
+  if (Math.abs((a.startOffset ?? 0) - (b.startOffset ?? 0)) > 0.01) {
+    return true;
+  }
+
+  if (Math.abs((a.endOffset ?? 0) - (b.endOffset ?? 0)) > 0.01) {
+    return true;
+  }
+
+  const orientationA =
+    a.orientation === AUTOROUTE_ORIENTATION_END_FIRST
+      ? AUTOROUTE_ORIENTATION_END_FIRST
+      : AUTOROUTE_ORIENTATION_START_FIRST;
+  const orientationB =
+    b.orientation === AUTOROUTE_ORIENTATION_END_FIRST
+      ? AUTOROUTE_ORIENTATION_END_FIRST
+      : AUTOROUTE_ORIENTATION_START_FIRST;
+
+  return orientationA !== orientationB;
 }
 
 function connectorEndsDiffer(a, b) {
@@ -2196,9 +2472,9 @@ function getConnectorGeometry(connector, cardMap) {
     (!Array.isArray(connector?.bends) || connector.bends.length === 0);
 
   if (autorouteEnabled) {
-    const autorouted = buildOrthogonalConnectorPoints(start, end);
-    if (autorouted.length > 0) {
-      return { points: autorouted };
+    const autorouted = buildOrthogonalConnectorPoints(start, end, connector?.autoroute);
+    if (autorouted.points.length > 0) {
+      return { points: autorouted.points, autoroute: autorouted.autoroute };
     }
   }
 
@@ -2220,7 +2496,7 @@ function getConnectorGeometry(connector, cardMap) {
     points.push(end.point);
   }
 
-  return { points };
+  return { points, autoroute: null };
 }
 
 function findConnectorHit(pointer, connectors, cards, scale) {
@@ -2243,7 +2519,8 @@ function findConnectorHit(pointer, connectors, cards, scale) {
     const connector = connectors[index];
     if (!connector) continue;
 
-    const { points } = getConnectorGeometry(connector, cardMap);
+    const geometry = getConnectorGeometry(connector, cardMap);
+    const { points } = geometry;
     if (points.length < 2) {
       continue;
     }
@@ -2265,13 +2542,23 @@ function findConnectorHit(pointer, connectors, cards, scale) {
       return { type: 'endpoint', connector, endpoint: 'target' };
     }
 
-    if (Array.isArray(connector.bends)) {
+    if (Array.isArray(connector.bends) && connector.bends.length > 0) {
       for (let bendIndex = connector.bends.length - 1; bendIndex >= 0; bendIndex -= 1) {
         const bend = connector.bends[bendIndex];
         if (!bend) continue;
         if (Math.hypot(pointer.x - bend.x, pointer.y - bend.y) <= handleRadius) {
           return { type: 'bend', connector, index: bendIndex };
         }
+      }
+    } else if (geometry.autoroute?.corner) {
+      const corner = geometry.autoroute.corner;
+      if (Math.hypot(pointer.x - corner.x, pointer.y - corner.y) <= handleRadius) {
+        return {
+          type: 'autoroute-corner',
+          connector,
+          corner,
+          autoroute: geometry.autoroute,
+        };
       }
     }
 
@@ -2305,7 +2592,8 @@ function distanceToSegment(point, start, end) {
 }
 
 function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = false }) {
-  const { points } = getConnectorGeometry(connector, cardMap);
+  const geometry = getConnectorGeometry(connector, cardMap);
+  const { points } = geometry;
   if (points.length < 2) {
     return;
   }
@@ -2323,8 +2611,12 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   ctx.stroke();
 
   const capColor = selected ? '#2563EB' : '#1F2937';
-  drawConnectorCap(ctx, points[0], capColor, effectiveScale);
-  drawConnectorCap(ctx, points[points.length - 1], capColor, effectiveScale);
+  drawConnectorStartCap(ctx, points[0], capColor, effectiveScale);
+  if (points.length >= 2) {
+    const tail = points[points.length - 2];
+    const tip = points[points.length - 1];
+    drawConnectorArrowCap(ctx, tail, tip, capColor, effectiveScale);
+  }
 
   if (selected || isDraft) {
     ctx.fillStyle = selected ? '#2563EB' : '#1F2937';
@@ -2332,20 +2624,28 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
     ctx.lineWidth = 1.5 / effectiveScale;
 
     const handlePoints = [points[0]];
-    if (Array.isArray(connector.bends)) {
+    if (Array.isArray(connector.bends) && connector.bends.length > 0) {
       for (const bend of connector.bends) {
         if (bend && typeof bend.x === 'number' && typeof bend.y === 'number') {
           handlePoints.push(bend);
         }
       }
+    } else if (geometry.autoroute?.corner) {
+      handlePoints.push(geometry.autoroute.corner);
     }
     handlePoints.push(points[points.length - 1]);
 
-    for (const point of handlePoints) {
+    for (let index = 0; index < handlePoints.length; index += 1) {
+      const point = handlePoints[index];
+      const isEndHandle = index === handlePoints.length - 1;
       ctx.beginPath();
       ctx.arc(point.x, point.y, CONNECTOR_HANDLE_RADIUS / effectiveScale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      if (isEndHandle) {
+        ctx.stroke();
+      } else {
+        ctx.fill();
+        ctx.stroke();
+      }
     }
   }
 
@@ -2403,7 +2703,7 @@ function drawRoundedPolylinePath(ctx, points, radius) {
   }
 }
 
-function drawConnectorCap(ctx, point, color, scale = 1) {
+function drawConnectorStartCap(ctx, point, color, scale = 1) {
   if (!point) {
     return;
   }
@@ -2415,6 +2715,56 @@ function drawConnectorCap(ctx, point, color, scale = 1) {
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawConnectorArrowCap(ctx, from, to, color, scale = 1) {
+  if (!from || !to) {
+    return;
+  }
+
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) {
+    return;
+  }
+
+  const effectiveScale = Math.max(scale, 0.01);
+  const arrowLength = CONNECTOR_ARROW_LENGTH / effectiveScale;
+  const arrowWidth = CONNECTOR_ARROW_WIDTH / effectiveScale;
+
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+
+  const tip = to;
+  const base = {
+    x: tip.x - ux * arrowLength,
+    y: tip.y - uy * arrowLength,
+  };
+  const left = {
+    x: base.x + px * arrowWidth,
+    y: base.y + py * arrowWidth,
+  };
+  const right = {
+    x: base.x - px * arrowWidth,
+    y: base.y - py * arrowWidth,
+  };
+  const notch = {
+    x: base.x - ux * (arrowLength * 0.2),
+    y: base.y - uy * (arrowLength * 0.2),
+  };
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(left.x, left.y);
+  ctx.quadraticCurveTo(notch.x, notch.y, right.x, right.y);
+  ctx.closePath();
   ctx.fill();
   ctx.restore();
 }
