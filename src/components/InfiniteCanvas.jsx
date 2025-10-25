@@ -10,12 +10,12 @@ import PillNavigation from './PillNavigation.jsx';
 
 const COLOR_OPTIONS = [
   { id: 'white', label: 'White', color: '#FFFFFF', textColor: '#111827' },
-  { id: 'slate', label: 'Slate', color: '#0F172A', textColor: '#F9FAFB' },
-  { id: 'blue', label: 'Blue', color: '#1D4ED8', textColor: '#F9FAFB' },
-  { id: 'emerald', label: 'Emerald', color: '#047857', textColor: '#F9FAFB' },
-  { id: 'purple', label: 'Purple', color: '#6B21A8', textColor: '#F9FAFB' },
-  { id: 'amber', label: 'Amber', color: '#F59E0B', textColor: '#111827' },
-  { id: 'rose', label: 'Rose', color: '#DC2626', textColor: '#F9FAFB' },
+  { id: 'sky', label: 'Sky', color: '#E0F2FE', textColor: '#0F172A' },
+  { id: 'powder', label: 'Powder', color: '#E0E7FF', textColor: '#1E1B4B' },
+  { id: 'mint', label: 'Mint', color: '#D1FAE5', textColor: '#064E3B' },
+  { id: 'peach', label: 'Peach', color: '#FFE4E6', textColor: '#9F1239' },
+  { id: 'sunrise', label: 'Sunrise', color: '#FEF3C7', textColor: '#92400E' },
+  { id: 'lavender', label: 'Lavender', color: '#F5F3FF', textColor: '#4C1D95' },
 ];
 
 const DEFAULT_CARD = {
@@ -767,12 +767,12 @@ export default function InfiniteCanvas() {
             gap: 8,
             padding: '10px 16px',
             borderRadius: 9999,
-            background: 'rgba(17, 17, 17, 0.92)',
+            background: 'rgba(255, 255, 255, 0.96)',
             boxShadow:
-              '0 10px 30px rgba(15, 23, 42, 0.25), 0 2px 8px rgba(15, 23, 42, 0.18)',
+              '0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.08)',
             alignItems: 'center',
             zIndex: 20,
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            border: '1px solid rgba(15, 23, 42, 0.08)',
           }}
         >
           {COLOR_OPTIONS.map((option) => (
@@ -786,16 +786,21 @@ export default function InfiniteCanvas() {
                 height: 28,
                 borderRadius: '9999px',
                 border:
-                  activeCard.color === option.color
-                    ? '2px solid #F9FAFB'
-                    : '2px solid rgba(255, 255, 255, 0.3)',
+                  option.id === 'white'
+                    ? '1px solid rgba(15, 23, 42, 0.16)'
+                    : '1px solid transparent',
                 padding: 0,
                 background: option.color,
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                transition: 'transform 0.15s ease, border-color 0.15s ease',
+                boxShadow:
+                  activeCard.color === option.color
+                    ? '0 0 0 4px rgba(37, 99, 235, 0.18)'
+                    : '0 1px 2px rgba(15, 23, 42, 0.12)',
+                transition:
+                  'transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease',
               }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.transform = 'scale(1.1)';
@@ -804,18 +809,6 @@ export default function InfiniteCanvas() {
                 event.currentTarget.style.transform = 'scale(1)';
               }}
             >
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: '50%',
-                  background: option.color,
-                  boxShadow:
-                    option.color.toLowerCase() === '#ffffff'
-                      ? 'inset 0 0 0 1px rgba(17, 24, 39, 0.12)'
-                      : 'none',
-                }}
-              />
             </button>
           ))}
         </div>
@@ -919,11 +912,14 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
   if (visibility > 0.01) {
     ctx.save();
     ctx.globalAlpha = visibility;
-    ctx.fillStyle = '#111';
-    ctx.beginPath();
     const handleCenter = getHandleCenter(card);
+    ctx.beginPath();
+    ctx.fillStyle = '#0F172A';
     ctx.arc(handleCenter.x, handleCenter.y, HANDLE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.stroke();
     ctx.restore();
   }
 
