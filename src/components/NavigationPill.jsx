@@ -4,9 +4,25 @@
  * on Oct 25, 2025 at 1:36 AM.
  */
 import { useCallback, useMemo, useState } from 'react';
+import DiamondIcon from './DiamondIcon.jsx';
 
-export default function NavigationPill({ onAddCard, onStartConnector }) {
+const tooltipStyle = {
+  position: 'absolute',
+  bottom: 'calc(100% + 8px)',
+  paddingInline: '12px',
+  paddingBlock: '6px',
+  backgroundColor: '#111827',
+  color: '#FFFFFF',
+  borderRadius: '9999px',
+  fontSize: '12px',
+  lineHeight: '1',
+  whiteSpace: 'nowrap',
+  boxShadow: '0 4px 10px rgba(0, 0, 0, 0.15)',
+};
+
+export default function NavigationPill({ onAddCard, onAddDiamond, onStartConnector }) {
   const [isCardHovered, setIsCardHovered] = useState(false);
+  const [isDiamondHovered, setIsDiamondHovered] = useState(false);
   const [isArrowHovered, setIsArrowHovered] = useState(false);
 
   const handleCardActivate = useCallback(() => {
@@ -14,6 +30,12 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
       onAddCard();
     }
   }, [onAddCard]);
+
+  const handleDiamondActivate = useCallback(() => {
+    if (typeof onAddDiamond === 'function') {
+      onAddDiamond();
+    }
+  }, [onAddDiamond]);
 
   const handleArrowActivate = useCallback(() => {
     if (typeof onStartConnector === 'function') {
@@ -29,6 +51,16 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
       }
     },
     [handleCardActivate]
+  );
+
+  const handleDiamondKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleDiamondActivate();
+      }
+    },
+    [handleDiamondActivate]
   );
 
   const handleArrowKeyDown = useCallback(
@@ -64,6 +96,27 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
     [isCardHovered]
   );
 
+  const diamondIconStyle = useMemo(
+    () => ({
+      boxSizing: 'border-box',
+      flexShrink: '0',
+      height: '30px',
+      maxHeight: 'none',
+      maxWidth: 'none',
+      position: 'relative',
+      transformOrigin: '50% 50%',
+      width: '30px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      transition: 'filter 150ms ease, opacity 150ms ease',
+      filter: isDiamondHovered ? 'brightness(0.75)' : 'none',
+      opacity: isDiamondHovered ? 0.6 : 1,
+    }),
+    [isDiamondHovered]
+  );
+
   const arrowIconStyle = useMemo(
     () => ({
       backgroundImage:
@@ -81,6 +134,7 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
       width: '30px',
       transition: 'opacity 150ms ease',
       opacity: isArrowHovered ? 0.6 : 1,
+      cursor: 'pointer',
     }),
     [isArrowHovered]
   );
@@ -121,25 +175,26 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
           onKeyDown={handleCardKeyDown}
           style={cardIconStyle}
         />
-        {isCardHovered && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 'calc(100% + 8px)',
-              paddingInline: '12px',
-              paddingBlock: '6px',
-              backgroundColor: '#111827',
-              color: '#FFFFFF',
-              borderRadius: '9999px',
-              fontSize: '12px',
-              lineHeight: '1',
-              whiteSpace: 'nowrap',
-              boxShadow: '0 4px 10px rgba(0, 0, 0, 0.15)',
-            }}
-          >
-            Card (C)
-          </div>
-        )}
+        {isCardHovered && <div style={tooltipStyle}>Card (C)</div>}
+      </div>
+      <div
+        style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onMouseEnter={() => setIsDiamondHovered(true)}
+        onMouseLeave={() => setIsDiamondHovered(false)}
+        onFocus={() => setIsDiamondHovered(true)}
+        onBlur={() => setIsDiamondHovered(false)}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Add diamond"
+          onClick={handleDiamondActivate}
+          onKeyDown={handleDiamondKeyDown}
+          style={diamondIconStyle}
+        >
+          <DiamondIcon />
+        </div>
+        {isDiamondHovered && <div style={tooltipStyle}>Diamond (D)</div>}
       </div>
       <div
         style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -156,25 +211,7 @@ export default function NavigationPill({ onAddCard, onStartConnector }) {
           onKeyDown={handleArrowKeyDown}
           style={arrowIconStyle}
         />
-        {isArrowHovered && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 'calc(100% + 8px)',
-              paddingInline: '12px',
-              paddingBlock: '6px',
-              backgroundColor: '#111827',
-              color: '#FFFFFF',
-              borderRadius: '9999px',
-              fontSize: '12px',
-              lineHeight: '1',
-              whiteSpace: 'nowrap',
-              boxShadow: '0 4px 10px rgba(0, 0, 0, 0.15)',
-            }}
-          >
-            Arrow (A)
-          </div>
-        )}
+        {isArrowHovered && <div style={tooltipStyle}>Arrow (A)</div>}
       </div>
     </div>
   );
