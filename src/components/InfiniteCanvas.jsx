@@ -43,6 +43,10 @@ const CONNECTOR_HANDLE_RADIUS = 12;
 const CONNECTOR_LINE_WIDTH = 3;
 const CONNECTOR_SELECTED_LINE_WIDTH = 4.5;
 const CONNECTOR_HIT_DISTANCE = 16;
+const CONNECTOR_START_CAP_RADIUS = 6;
+const CONNECTOR_ARROW_TIP_RADIUS = 8;
+const CONNECTOR_ARROW_LENGTH = 32;
+const CONNECTOR_ARROW_BASE_WIDTH = 18;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -283,16 +287,50 @@ export default function InfiniteCanvas() {
       return;
     }
 
-    setActiveCardId(null);
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const viewportCenter = {
+      x: (rect.width / 2 - panRef.current.x) / scaleRef.current,
+      y: (rect.height / 2 - panRef.current.y) / scaleRef.current,
+    };
+
+    const offset = 80;
+    const connectorId = `connector-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}`;
+    const newConnector = {
+      id: connectorId,
+      source: {
+        cardId: null,
+        anchor: null,
+        absolute: {
+          x: viewportCenter.x - offset,
+          y: viewportCenter.y,
+        },
+      },
+      target: {
+        cardId: null,
+        anchor: null,
+        absolute: {
+          x: viewportCenter.x + offset,
+          y: viewportCenter.y,
+        },
+      },
+      bends: [],
+    };
+
+    recordSnapshot();
+    setConnectors((prev) => [...prev, newConnector]);
+    setSelectedConnectorIds([connectorId]);
     setSelectedCardIds([]);
-    setSelectedConnectorIds([]);
+    setActiveCardId(null);
     setDraftConnector(null);
-    setInteraction({
-      type: 'connector-create',
-      stage: 'await-source',
-      hasSnapshot: false,
-    });
-  }, [setInteraction]);
+    setInteraction({ type: 'idle' });
+  }, [recordSnapshot, setInteraction]);
 
   const addCard = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1954,7 +1992,8 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   ctx.stroke();
 
   const arrowColor = selected ? '#2563EB' : '#1F2937';
-  drawArrowHead(
+  drawConnectorStartCap(ctx, points[0], arrowColor, effectiveScale);
+  drawRoundedArrowHead(
     ctx,
     points[points.length - 2],
     points[points.length - 1],
@@ -1988,24 +2027,85 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   ctx.restore();
 }
 
-function drawArrowHead(ctx, from, to, color, scale = 1) {
-  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+function drawConnectorStartCap(ctx, point, color, scale = 1) {
+  if (!point) {
+    return;
+  }
+
   const effectiveScale = Math.max(scale, 0.01);
-  const length = 18 / effectiveScale;
-  const spread = Math.PI / 6;
+  const radius = CONNECTOR_START_CAP_RADIUS / effectiveScale;
 
   ctx.save();
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(to.x, to.y);
-  ctx.lineTo(
-    to.x - length * Math.cos(angle - spread),
-    to.y - length * Math.sin(angle - spread)
-  );
-  ctx.lineTo(
-    to.x - length * Math.cos(angle + spread),
-    to.y - length * Math.sin(angle + spread)
-  );
+  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawRoundedArrowHead(ctx, from, to, color, scale = 1) {
+  if (!from || !to) {
+    return;
+  }
+
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) {
+    return;
+  }
+
+  const effectiveScale = Math.max(scale, 0.01);
+  const tipRadius = CONNECTOR_ARROW_TIP_RADIUS / effectiveScale;
+  const maxArrowLength = CONNECTOR_ARROW_LENGTH / effectiveScale;
+  const arrowLength = Math.min(length, maxArrowLength);
+
+  if (arrowLength <= tipRadius * 1.1) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, tipRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  const baseWidth = CONNECTOR_ARROW_BASE_WIDTH / effectiveScale;
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+
+  const baseCenter = {
+    x: to.x - ux * arrowLength,
+    y: to.y - uy * arrowLength,
+  };
+
+  const leftBase = {
+    x: baseCenter.x + px * (baseWidth / 2),
+    y: baseCenter.y + py * (baseWidth / 2),
+  };
+
+  const rightBase = {
+    x: baseCenter.x - px * (baseWidth / 2),
+    y: baseCenter.y - py * (baseWidth / 2),
+  };
+
+  const control = {
+    x: baseCenter.x - ux * Math.min(arrowLength * 0.2, tipRadius * 1.25),
+    y: baseCenter.y - uy * Math.min(arrowLength * 0.2, tipRadius * 1.25),
+  };
+
+  const angle = Math.atan2(dy, dx);
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(leftBase.x, leftBase.y);
+  ctx.lineTo(to.x - ux * tipRadius, to.y - uy * tipRadius);
+  ctx.arc(to.x, to.y, tipRadius, angle - Math.PI / 2, angle + Math.PI / 2);
+  ctx.lineTo(rightBase.x, rightBase.y);
+  ctx.quadraticCurveTo(control.x, control.y, leftBase.x, leftBase.y);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
