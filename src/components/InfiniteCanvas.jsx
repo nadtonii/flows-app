@@ -229,6 +229,7 @@ export default function InfiniteCanvas() {
     setSelectedCardIds([newCard.id]);
     setHoveredCardId(newCard.id);
   }, [pushHistory]);
+  }, []);
 
   const duplicateSelectedCards = useCallback(() => {
     if (selectedCardIds.length === 0) {
@@ -261,6 +262,7 @@ export default function InfiniteCanvas() {
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
   }, [pushHistory, selectedCardIds]);
+  }, [selectedCardIds]);
 
   const copySelectedCards = useCallback(() => {
     if (selectedCardIds.length === 0) {
@@ -307,6 +309,7 @@ export default function InfiniteCanvas() {
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
   }, [pushHistory]);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -399,6 +402,7 @@ export default function InfiniteCanvas() {
     redo,
     pasteCopiedCards,
     undo,
+    pasteCopiedCards,
     selectedCardIds,
   ]);
 
