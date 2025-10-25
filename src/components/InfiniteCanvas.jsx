@@ -50,7 +50,7 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function createCard({ x, y }) {
+function createCard({ x, y, shape = 'card' }) {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     x,
@@ -61,6 +61,7 @@ function createCard({ x, y }) {
     isPlaceholder: true,
     color: DEFAULT_CARD.color,
     textColor: DEFAULT_CARD.textColor,
+    shape,
   };
 }
 
@@ -330,7 +331,7 @@ export default function InfiniteCanvas() {
     setInteraction({ type: 'idle' });
   }, [recordSnapshot, setInteraction]);
 
-  const addCard = useCallback(() => {
+  const addCard = useCallback((shape = 'card') => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -342,6 +343,7 @@ export default function InfiniteCanvas() {
     const newCard = createCard({
       x: viewportCenter.x - DEFAULT_CARD.width / 2,
       y: viewportCenter.y - DEFAULT_CARD.height / 2,
+      shape,
     });
 
     recordSnapshot();
@@ -349,6 +351,10 @@ export default function InfiniteCanvas() {
     setActiveCardId(newCard.id);
     setSelectedCardIds([newCard.id]);
   }, [recordSnapshot]);
+
+  const addDiamond = useCallback(() => {
+    addCard('diamond');
+  }, [addCard]);
 
   const duplicateSelectedCards = useCallback(() => {
     if (selectedCardIds.length === 0) {
@@ -587,6 +593,12 @@ export default function InfiniteCanvas() {
       if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'c') {
         event.preventDefault();
         addCard();
+        return;
+      }
+
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        addCard('diamond');
         return;
       }
 
@@ -1359,7 +1371,8 @@ export default function InfiniteCanvas() {
       ctx,
       editingCard.text,
       editingCard.width,
-      editingCard.height
+      editingCard.height,
+      getCardPlaceholder(editingCard)
     );
   }, [editingCard, getMeasurementContext]);
 
@@ -1486,7 +1499,8 @@ export default function InfiniteCanvas() {
               ctx,
               value,
               card.width,
-              card.height
+              card.height,
+              getCardPlaceholder(card)
             );
 
             if (!layout.fitsWithin) {
@@ -1692,7 +1706,7 @@ export default function InfiniteCanvas() {
           ref={textareaRef}
           autoFocus
           value={editingCard.text}
-          placeholder="Card"
+          placeholder={getCardPlaceholder(editingCard)}
           onChange={handleTextChange}
           onBlur={() => setEditingCardId(null)}
           aria-label="Edit card"
@@ -1795,6 +1809,7 @@ export default function InfiniteCanvas() {
 
       <PillNavigation
         onAddCard={addCard}
+        onAddDiamond={addDiamond}
         onStartConnector={startConnectorCreation}
       />
     </div>
@@ -2054,6 +2069,14 @@ function connectorEndsDiffer(a, b) {
   );
 }
 
+function getCardPlaceholder(card) {
+  if (!card) {
+    return 'Card';
+  }
+
+  return card.shape === 'diamond' ? 'Diamond' : 'Card';
+}
+
 function resolveConnectorEndPosition(end, cardMap) {
   if (!end) {
     return { point: null, attached: false };
@@ -2265,22 +2288,68 @@ function drawCard(
     selectedCount = 0,
   }
 ) {
-  const radius = 18;
   const { x, y, width, height } = card;
+  const shape = card.shape ?? 'card';
 
   ctx.save();
   ctx.fillStyle = card.color ?? '#ffffff';
 
   ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + width - radius, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-  ctx.lineTo(x + width, y + height - radius);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  ctx.lineTo(x + radius, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
+  if (shape === 'diamond') {
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+    const maxCorner = Math.min(halfWidth, halfHeight);
+    const cornerRadius = Math.max(0, Math.min(12, maxCorner * 0.4));
+
+    ctx.moveTo(centerX, y + cornerRadius);
+    ctx.quadraticCurveTo(
+      centerX,
+      y,
+      centerX + cornerRadius,
+      y + cornerRadius
+    );
+    ctx.lineTo(x + width - cornerRadius, centerY - cornerRadius);
+    ctx.quadraticCurveTo(
+      x + width,
+      centerY,
+      x + width - cornerRadius,
+      centerY + cornerRadius
+    );
+    ctx.lineTo(centerX + cornerRadius, y + height - cornerRadius);
+    ctx.quadraticCurveTo(
+      centerX,
+      y + height,
+      centerX - cornerRadius,
+      y + height - cornerRadius
+    );
+    ctx.lineTo(x + cornerRadius, centerY + cornerRadius);
+    ctx.quadraticCurveTo(
+      x,
+      centerY,
+      x + cornerRadius,
+      centerY - cornerRadius
+    );
+    ctx.lineTo(centerX - cornerRadius, y + cornerRadius);
+    ctx.quadraticCurveTo(centerX, y, centerX, y + cornerRadius);
+  } else {
+    const radius = 18;
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(
+      x + width,
+      y + height,
+      x + width - radius,
+      y + height
+    );
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+  }
   ctx.closePath();
 
   const shouldHighlightSelection = isSelected && selectedCount > 1;
@@ -2314,7 +2383,8 @@ function drawCard(
       ctx,
       card.text,
       width,
-      height
+      height,
+      getCardPlaceholder(card)
     );
 
     ctx.font = `600 ${layout.fontSize}px "Inter", sans-serif`;
@@ -2356,14 +2426,14 @@ function drawCard(
   ctx.restore();
 }
 
-function calculateCardTypography(ctx, text, width, height) {
+function calculateCardTypography(ctx, text, width, height, placeholder = 'Card') {
   const originalFont = ctx.font;
   const maxWidth = Math.max(1, width - CARD_TEXT_INSET * 2);
   const maxHeight = Math.max(1, height - CARD_TEXT_INSET * 2);
-  const content = text && text.trim().length > 0 ? text : 'Card';
+  const content = text && text.trim().length > 0 ? text : placeholder;
 
   ctx.font = `600 ${CARD_TEXT_MAX_FONT_SIZE}px "Inter", sans-serif`;
-  const initialLines = wrapCardLines(ctx, content, maxWidth);
+  const initialLines = wrapCardLines(ctx, content, maxWidth, placeholder);
   const initialTarget = CARD_TEXT_MAX_FONT_SIZE -
     Math.max(0, initialLines.length - 1) * CARD_TEXT_SHRINK_PER_LINE;
 
@@ -2380,7 +2450,7 @@ function calculateCardTypography(ctx, text, width, height) {
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     ctx.font = `600 ${fontSize}px "Inter", sans-serif`;
-    lines = wrapCardLines(ctx, content, maxWidth);
+    lines = wrapCardLines(ctx, content, maxWidth, placeholder);
     lineHeight = fontSize * CARD_TEXT_LINE_HEIGHT_MULTIPLIER;
     totalHeight = lines.length * lineHeight;
     fitsWithin = totalHeight <= maxHeight;
@@ -2399,14 +2469,14 @@ function calculateCardTypography(ctx, text, width, height) {
   return {
     fontSize,
     lineHeight,
-    lines: lines.length > 0 ? lines : ['Card'],
+    lines: lines.length > 0 ? lines : [placeholder],
     totalHeight,
     fitsWithin,
   };
 }
 
-function wrapCardLines(ctx, text, maxWidth) {
-  const sanitized = text && text.trim().length > 0 ? text : 'Card';
+function wrapCardLines(ctx, text, maxWidth, placeholder = 'Card') {
+  const sanitized = text && text.trim().length > 0 ? text : placeholder;
   const paragraphs = sanitized.split(/\r?\n/);
   const lines = [];
 
