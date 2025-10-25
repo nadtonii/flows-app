@@ -43,7 +43,8 @@ const CONNECTOR_HANDLE_RADIUS = 12;
 const CONNECTOR_LINE_WIDTH = 3;
 const CONNECTOR_SELECTED_LINE_WIDTH = 4.5;
 const CONNECTOR_HIT_DISTANCE = 16;
-const CONNECTOR_CAP_RADIUS = 6;
+const CONNECTOR_CAP_RADIUS = 4;
+const CONNECTOR_CARD_OFFSET = 10;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -768,7 +769,7 @@ export default function InfiniteCanvas() {
             return [...prev, connectorId];
           }
           if (prev.length === 1 && prev[0] === connectorId) {
-            return prev;
+            return [...prev];
           }
           return [connectorId];
         });
@@ -1875,19 +1876,32 @@ function calculateConnectorAnchor(card, point) {
     return { x: 0.5, y: 0.5 };
   }
 
-  const localX = clamp((point.x - card.x) / card.width, 0, 1);
-  const localY = clamp((point.y - card.y) / card.height, 0, 1);
-
   const candidates = [
-    { distance: localX, anchor: { x: 0, y: localY } },
-    { distance: 1 - localX, anchor: { x: 1, y: localY } },
-    { distance: localY, anchor: { x: localX, y: 0 } },
-    { distance: 1 - localY, anchor: { x: localX, y: 1 } },
+    {
+      anchor: { x: 0, y: 0.5 },
+      position: { x: card.x, y: card.y + card.height / 2 },
+    },
+    {
+      anchor: { x: 1, y: 0.5 },
+      position: { x: card.x + card.width, y: card.y + card.height / 2 },
+    },
+    {
+      anchor: { x: 0.5, y: 0 },
+      position: { x: card.x + card.width / 2, y: card.y },
+    },
+    {
+      anchor: { x: 0.5, y: 1 },
+      position: { x: card.x + card.width / 2, y: card.y + card.height },
+    },
   ];
 
-  candidates.sort((a, b) => a.distance - b.distance);
-  const chosen = candidates[0]?.anchor ?? { x: 0.5, y: 0.5 };
+  candidates.sort((a, b) => {
+    const distanceA = Math.hypot(point.x - a.position.x, point.y - a.position.y);
+    const distanceB = Math.hypot(point.x - b.position.x, point.y - b.position.y);
+    return distanceA - distanceB;
+  });
 
+  const chosen = candidates[0]?.anchor ?? { x: 0.5, y: 0.5 };
   return {
     x: clamp(chosen.x, 0, 1),
     y: clamp(chosen.y, 0, 1),
@@ -1898,6 +1912,45 @@ function anchorsEqual(a, b) {
   if (!a && !b) return true;
   if (!a || !b) return false;
   return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001;
+}
+
+function getAnchorNormal(anchor) {
+  if (!anchor) {
+    return { x: 0, y: -1 };
+  }
+
+  const threshold = 0.001;
+  let normalX = 0;
+  let normalY = 0;
+
+  if (anchor.x <= threshold) normalX = -1;
+  else if (anchor.x >= 1 - threshold) normalX = 1;
+
+  if (anchor.y <= threshold) normalY = -1;
+  else if (anchor.y >= 1 - threshold) normalY = 1;
+
+  if (normalX === 0 && normalY === 0) {
+    if (anchor.x < 0.5 - threshold) normalX = -1;
+    else if (anchor.x > 0.5 + threshold) normalX = 1;
+
+    if (anchor.y < 0.5 - threshold) normalY = -1;
+    else if (anchor.y > 0.5 + threshold) normalY = 1;
+  }
+
+  const length = Math.hypot(normalX, normalY);
+  if (length === 0) {
+    return { x: 0, y: -1 };
+  }
+
+  return { x: normalX / length, y: normalY / length };
+}
+
+function offsetPointFromCard(point, anchor) {
+  const normal = getAnchorNormal(anchor);
+  return {
+    x: point.x + normal.x * CONNECTOR_CARD_OFFSET,
+    y: point.y + normal.y * CONNECTOR_CARD_OFFSET,
+  };
 }
 
 function translateConnector(connector, delta) {
@@ -2009,11 +2062,13 @@ function resolveConnectorEndPosition(end, cardMap) {
   if (end.cardId && end.anchor) {
     const card = cardMap.get(end.cardId);
     if (card) {
+      const anchor = end.anchor;
+      const anchorPoint = {
+        x: card.x + card.width * anchor.x,
+        y: card.y + card.height * anchor.y,
+      };
       return {
-        point: {
-          x: card.x + card.width * end.anchor.x,
-          y: card.y + card.height * end.anchor.y,
-        },
+        point: offsetPointFromCard(anchorPoint, anchor),
         attached: true,
       };
     }
