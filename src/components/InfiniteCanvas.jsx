@@ -8,9 +8,21 @@ import {
 } from 'react';
 import PillNavigation from './PillNavigation.jsx';
 
+const COLOR_OPTIONS = [
+  { id: 'white', label: 'White', color: '#FFFFFF', textColor: '#111827' },
+  { id: 'slate', label: 'Slate', color: '#0F172A', textColor: '#F9FAFB' },
+  { id: 'blue', label: 'Blue', color: '#1D4ED8', textColor: '#F9FAFB' },
+  { id: 'emerald', label: 'Emerald', color: '#047857', textColor: '#F9FAFB' },
+  { id: 'purple', label: 'Purple', color: '#6B21A8', textColor: '#F9FAFB' },
+  { id: 'amber', label: 'Amber', color: '#F59E0B', textColor: '#111827' },
+  { id: 'rose', label: 'Rose', color: '#DC2626', textColor: '#F9FAFB' },
+];
+
 const DEFAULT_CARD = {
   width: 300,
   height: 300,
+  color: COLOR_OPTIONS[0].color,
+  textColor: COLOR_OPTIONS[0].textColor,
 };
 
 const MIN_CARD_WIDTH = 120;
@@ -40,6 +52,8 @@ function createCard({ x, y }) {
     height: DEFAULT_CARD.height,
     text: '',
     isPlaceholder: true,
+    color: DEFAULT_CARD.color,
+    textColor: DEFAULT_CARD.textColor,
   };
 }
 
@@ -390,6 +404,19 @@ export default function InfiniteCanvas() {
     [cards, editingCardId]
   );
 
+  const activeCard = useMemo(
+    () => cards.find((card) => card.id === activeCardId) ?? null,
+    [cards, activeCardId]
+  );
+
+  const toolbarPosition = useMemo(() => {
+    if (!activeCard) return null;
+    return {
+      left: activeCard.x * scale + pan.x + (activeCard.width * scale) / 2,
+      top: activeCard.y * scale + pan.y,
+    };
+  }, [activeCard, pan, scale]);
+
   const editingTypography = useMemo(() => {
     if (!editingCard) return null;
 
@@ -527,6 +554,20 @@ export default function InfiniteCanvas() {
     },
     [editingCardId, getMeasurementContext]
   );
+
+  const handleCardColorChange = useCallback((cardId, option) => {
+    setCards((prev) =>
+      prev.map((card) =>
+        card.id === cardId
+          ? {
+              ...card,
+              color: option.color,
+              textColor: option.textColor,
+            }
+          : card
+      )
+    );
+  }, []);
 
   const textareaPosition = useMemo(() => {
     if (!editingCard) return null;
@@ -690,7 +731,11 @@ export default function InfiniteCanvas() {
             textAlign: 'center',
             border: 'none',
             background: 'transparent',
-            color: editingCard.text ? '#111' : '#999',
+            color: editingCard.text
+              ? editingCard.textColor
+              : editingCard.textColor === '#F9FAFB'
+              ? 'rgba(249, 250, 251, 0.75)'
+              : '#999',
             resize: 'none',
             overflowWrap: 'break-word',
             wordBreak: 'break-word',
@@ -709,6 +754,71 @@ export default function InfiniteCanvas() {
             zIndex: 10,
           }}
         />
+      )}
+
+      {activeCard && toolbarPosition && (
+        <div
+          style={{
+            position: 'absolute',
+            left: toolbarPosition.left,
+            top: toolbarPosition.top,
+            transform: 'translate(-50%, -100%) translateY(-16px)',
+            display: 'flex',
+            gap: 8,
+            padding: '10px 16px',
+            borderRadius: 9999,
+            background: 'rgba(17, 17, 17, 0.92)',
+            boxShadow:
+              '0 10px 30px rgba(15, 23, 42, 0.25), 0 2px 8px rgba(15, 23, 42, 0.18)',
+            alignItems: 'center',
+            zIndex: 20,
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+          }}
+        >
+          {COLOR_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => handleCardColorChange(activeCard.id, option)}
+              aria-label={`Set card color to ${option.label}`}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '9999px',
+                border:
+                  activeCard.color === option.color
+                    ? '2px solid #F9FAFB'
+                    : '2px solid rgba(255, 255, 255, 0.3)',
+                padding: 0,
+                background: option.color,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'transform 0.15s ease, border-color 0.15s ease',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: option.color,
+                  boxShadow:
+                    option.color.toLowerCase() === '#ffffff'
+                      ? 'inset 0 0 0 1px rgba(17, 24, 39, 0.12)'
+                      : 'none',
+                }}
+              />
+            </button>
+          ))}
+        </div>
       )}
 
       <PillNavigation onAddCard={addCard} />
@@ -754,7 +864,7 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
   const { x, y, width, height } = card;
 
   ctx.save();
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = card.color ?? '#ffffff';
   ctx.strokeStyle = isActive ? '#111' : 'rgba(17, 17, 17, 0.12)';
   ctx.lineWidth = isActive ? 2 : 1;
 
@@ -774,7 +884,9 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
 
   if (!isEditing) {
     ctx.save();
-    ctx.fillStyle = card.isPlaceholder ? '#9ca3af' : '#111';
+    const placeholderColor =
+      card.textColor === '#F9FAFB' ? 'rgba(249, 250, 251, 0.7)' : '#9ca3af';
+    ctx.fillStyle = card.isPlaceholder ? placeholderColor : card.textColor;
     const layout = calculateCardTypography(
       ctx,
       card.text,
