@@ -9,7 +9,7 @@ import {
 import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
-  width: 240,
+  width: 580,
   height: 580,
 };
 
