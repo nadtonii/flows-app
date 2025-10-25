@@ -1235,7 +1235,7 @@ function drawCard(
   const shouldHighlightSelection = isSelected && selectedCount > 1;
   const strokeWidth = shouldHighlightSelection ? 2 : 1;
   const strokeColor = shouldHighlightSelection
-    ? 'rgba(37, 99, 235, 0.4)'
+    ? 'rgba(0, 0, 0, 0.4)'
     : 'rgba(17, 17, 17, 0.12)';
 
   if (isActive) {
