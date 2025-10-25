@@ -10,12 +10,12 @@ import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
   width: 240,
-  height: 140,
+  height: 440,
 };
 
 const MIN_CARD_WIDTH = 120;
 const MIN_CARD_HEIGHT = 80;
-const MAX_CARD_HEIGHT = 480;
+const MAX_CARD_HEIGHT = 780;
 const HANDLE_SIZE = 18;
 const HANDLE_RADIUS = HANDLE_SIZE / 2;
 const HANDLE_MARGIN = 6;
@@ -427,7 +427,11 @@ export default function InfiniteCanvas() {
     (event) => {
       const value = event.target.value;
       const approxLines = value.split('\n').length + Math.floor(value.length / 28);
-      const desiredHeight = clamp(approxLines * 22 + 48, MIN_CARD_HEIGHT, MAX_CARD_HEIGHT);
+      const desiredHeight = clamp(
+        approxLines * 22 + 48,
+        MIN_CARD_HEIGHT,
+        MAX_CARD_HEIGHT
+      );
 
       setCards((prev) =>
         prev.map((card) =>
@@ -436,7 +440,7 @@ export default function InfiniteCanvas() {
                 ...card,
                 text: value,
                 isPlaceholder: value.trim().length === 0,
-                height: desiredHeight,
+                height: Math.max(card.height, desiredHeight),
               }
             : card
         )
