@@ -5,7 +5,7 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 
-export default function NavigationPill({ onAddCard }) {
+export default function NavigationPill({ onAddCard, onStartConnector }) {
   const [isCardHovered, setIsCardHovered] = useState(false);
   const [isArrowHovered, setIsArrowHovered] = useState(false);
 
@@ -15,6 +15,12 @@ export default function NavigationPill({ onAddCard }) {
     }
   }, [onAddCard]);
 
+  const handleArrowActivate = useCallback(() => {
+    if (typeof onStartConnector === 'function') {
+      onStartConnector();
+    }
+  }, [onStartConnector]);
+
   const handleCardKeyDown = useCallback(
     (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -23,6 +29,16 @@ export default function NavigationPill({ onAddCard }) {
       }
     },
     [handleCardActivate]
+  );
+
+  const handleArrowKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleArrowActivate();
+      }
+    },
+    [handleArrowActivate]
   );
 
   const cardIconStyle = useMemo(
@@ -132,7 +148,14 @@ export default function NavigationPill({ onAddCard }) {
         onFocus={() => setIsArrowHovered(true)}
         onBlur={() => setIsArrowHovered(false)}
       >
-        <div style={arrowIconStyle} />
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Add connector"
+          onClick={handleArrowActivate}
+          onKeyDown={handleArrowKeyDown}
+          style={arrowIconStyle}
+        />
         {isArrowHovered && (
           <div
             style={{

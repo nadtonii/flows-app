@@ -39,6 +39,12 @@ const HANDLE_RADIUS = HANDLE_SIZE / 2;
 const HANDLE_MARGIN = 6;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2.5;
+const CONNECTOR_HANDLE_RADIUS = 12;
+const CONNECTOR_LINE_WIDTH = 3;
+const CONNECTOR_SELECTED_LINE_WIDTH = 4.5;
+const CONNECTOR_HIT_DISTANCE = 16;
+const CONNECTOR_CAP_RADIUS = 4;
+const CONNECTOR_CARD_OFFSET = 10;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -70,8 +76,10 @@ export default function InfiniteCanvas() {
   const interactionRef = useRef({ type: 'idle' });
 
   const [cards, setCards] = useState([]);
+  const [connectors, setConnectors] = useState([]);
   const [activeCardId, setActiveCardId] = useState(null);
   const [selectedCardIds, setSelectedCardIds] = useState([]);
+  const [selectedConnectorIds, setSelectedConnectorIds] = useState([]);
   const [editingCardId, setEditingCardId] = useState(null);
   const [hoveredCardId, setHoveredCardId] = useState(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -80,12 +88,14 @@ export default function InfiniteCanvas() {
   const [interactionType, setInteractionType] = useState('idle');
   const [editingPadding, setEditingPadding] = useState(0);
   const [handleAnimationVersion, setHandleAnimationVersion] = useState(0);
+  const [draftConnector, setDraftConnector] = useState(null);
   const [historyStatus, setHistoryStatus] = useState({
     canUndo: false,
     canRedo: false,
   });
 
   const cardsRef = useRef(cards);
+  const connectorsRef = useRef(connectors);
   const panRef = useRef(pan);
   const scaleRef = useRef(scale);
   const textareaRef = useRef(null);
@@ -97,6 +107,7 @@ export default function InfiniteCanvas() {
   const editingSnapshotRef = useRef(false);
   const activeCardIdRef = useRef(activeCardId);
   const selectedCardIdsRef = useRef(selectedCardIds);
+  const selectedConnectorIdsRef = useRef(selectedConnectorIds);
   const editingCardIdRef = useRef(editingCardId);
   const hoveredCardIdRef = useRef(hoveredCardId);
 
@@ -118,6 +129,10 @@ export default function InfiniteCanvas() {
   }, [cards]);
 
   useEffect(() => {
+    connectorsRef.current = connectors;
+  }, [connectors]);
+
+  useEffect(() => {
     panRef.current = pan;
   }, [pan]);
 
@@ -132,6 +147,10 @@ export default function InfiniteCanvas() {
   useEffect(() => {
     selectedCardIdsRef.current = selectedCardIds;
   }, [selectedCardIds]);
+
+  useEffect(() => {
+    selectedConnectorIdsRef.current = selectedConnectorIds;
+  }, [selectedConnectorIds]);
 
   useEffect(() => {
     editingCardIdRef.current = editingCardId;
@@ -170,10 +189,12 @@ export default function InfiniteCanvas() {
 
   const getSnapshot = useCallback(() => ({
     cards: cardsRef.current.map((card) => ({ ...card })),
+    connectors: connectorsRef.current.map((connector) => cloneConnector(connector)),
     pan: { ...panRef.current },
     scale: scaleRef.current,
     activeCardId: activeCardIdRef.current,
     selectedCardIds: [...(selectedCardIdsRef.current ?? [])],
+    selectedConnectorIds: [...(selectedConnectorIdsRef.current ?? [])],
     editingCardId: editingCardIdRef.current,
     hoveredCardId: hoveredCardIdRef.current,
   }), []);
@@ -185,10 +206,18 @@ export default function InfiniteCanvas() {
       }
 
       setCards(snapshot.cards ? snapshot.cards.map((card) => ({ ...card })) : []);
+      setConnectors(
+        snapshot.connectors
+          ? snapshot.connectors.map((connector) => cloneConnector(connector))
+          : []
+      );
       setPan(snapshot.pan ? { ...snapshot.pan } : { x: 0, y: 0 });
       setScale(snapshot.scale ?? 1);
       setActiveCardId(snapshot.activeCardId ?? null);
       setSelectedCardIds(snapshot.selectedCardIds ? [...snapshot.selectedCardIds] : []);
+      setSelectedConnectorIds(
+        snapshot.selectedConnectorIds ? [...snapshot.selectedConnectorIds] : []
+      );
       setEditingCardId(snapshot.editingCardId ?? null);
       setHoveredCardId(snapshot.hoveredCardId ?? null);
       interactionRef.current = { type: 'idle' };
@@ -246,6 +275,61 @@ export default function InfiniteCanvas() {
     }
   }, [recordSnapshot]);
 
+  const setInteraction = useCallback((interaction) => {
+    interactionRef.current = interaction;
+    setInteractionType(interaction.type);
+  }, []);
+
+  const startConnectorCreation = useCallback(() => {
+    if (editingCardIdRef.current !== null) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const viewportCenter = {
+      x: (rect.width / 2 - panRef.current.x) / scaleRef.current,
+      y: (rect.height / 2 - panRef.current.y) / scaleRef.current,
+    };
+
+    const offset = 80;
+    const connectorId = `connector-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}`;
+    const newConnector = {
+      id: connectorId,
+      source: {
+        cardId: null,
+        anchor: null,
+        absolute: {
+          x: viewportCenter.x - offset,
+          y: viewportCenter.y,
+        },
+      },
+      target: {
+        cardId: null,
+        anchor: null,
+        absolute: {
+          x: viewportCenter.x + offset,
+          y: viewportCenter.y,
+        },
+      },
+      bends: [],
+    };
+
+    recordSnapshot();
+    setConnectors((prev) => [...prev, newConnector]);
+    setSelectedConnectorIds([connectorId]);
+    setSelectedCardIds([]);
+    setActiveCardId(null);
+    setDraftConnector(null);
+    setInteraction({ type: 'idle' });
+  }, [recordSnapshot, setInteraction]);
+
   const addCard = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -288,11 +372,48 @@ export default function InfiniteCanvas() {
       isPlaceholder: card.text.trim().length === 0,
     }));
 
+    const cardIdMap = new Map();
+    selectedCards.forEach((card, index) => {
+      cardIdMap.set(card.id, duplicates[index].id);
+    });
+
+    const connectorDuplicates = connectorsRef.current
+      .filter((connector) => {
+        if (!connector?.source?.cardId || !connector?.target?.cardId) {
+          return false;
+        }
+
+        return (
+          cardIdMap.has(connector.source.cardId) &&
+          cardIdMap.has(connector.target.cardId)
+        );
+      })
+      .map((connector) => {
+        const clone = cloneConnector(connector);
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        return {
+          ...clone,
+          id,
+          source: {
+            ...clone.source,
+            cardId: cardIdMap.get(clone.source.cardId),
+          },
+          target: {
+            ...clone.target,
+            cardId: cardIdMap.get(clone.target.cardId),
+          },
+        };
+      });
+
     recordSnapshot();
     setCards((prev) => [...prev, ...duplicates]);
+    if (connectorDuplicates.length > 0) {
+      setConnectors((prev) => [...prev, ...connectorDuplicates]);
+    }
 
     const newIds = duplicates.map((card) => card.id);
     setSelectedCardIds(newIds);
+    setSelectedConnectorIds(connectorDuplicates.map((connector) => connector.id));
     setActiveCardId(newIds[newIds.length - 1] ?? null);
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
@@ -311,34 +432,116 @@ export default function InfiniteCanvas() {
       return;
     }
 
-    clipboardRef.current = selectedCards.map((card) => {
-      const { id, ...rest } = card;
-      return { ...rest };
+    const selectedCardSet = new Set(selectedCardIds);
+
+    const connectorsToCopy = connectorsRef.current.filter((connector) => {
+      if (!connector?.source?.cardId || !connector?.target?.cardId) {
+        return false;
+      }
+
+      return (
+        selectedCardSet.has(connector.source.cardId) &&
+        selectedCardSet.has(connector.target.cardId)
+      );
     });
+
+    clipboardRef.current = {
+      cards: selectedCards.map((card) => {
+        const { id, ...rest } = card;
+        return { ...rest, originalId: id };
+      }),
+      connectors: connectorsToCopy.map((connector) => {
+        const clone = cloneConnector(connector);
+        const { id, ...rest } = clone;
+        return rest;
+      }),
+    };
   }, [selectedCardIds]);
 
   const pasteCopiedCards = useCallback(() => {
     const clipboard = clipboardRef.current;
-    if (!clipboard || clipboard.length === 0) {
+    if (!clipboard ||
+      (Array.isArray(clipboard) && clipboard.length === 0) ||
+      (!Array.isArray(clipboard) && (!clipboard.cards || clipboard.cards.length === 0))
+    ) {
       return;
     }
 
     const offset = 24;
-    const pastedCards = clipboard.map((card) => ({
-      ...card,
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      x: card.x + offset,
-      y: card.y + offset,
-      isPlaceholder: card.text.trim().length === 0,
-    }));
+    const clipboardCards = Array.isArray(clipboard) ? clipboard : clipboard.cards;
+    const clipboardConnectors = Array.isArray(clipboard)
+      ? []
+      : clipboard.connectors ?? [];
+
+    const pastedCards = clipboardCards.map((card) => {
+      const { originalId, ...cardData } = card;
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const baseX = cardData.x ?? 0;
+      const baseY = cardData.y ?? 0;
+      const text = typeof cardData.text === 'string' ? cardData.text : '';
+
+      return {
+        ...cardData,
+        id,
+        x: baseX + offset,
+        y: baseY + offset,
+        isPlaceholder: text.trim().length === 0,
+      };
+    });
+
+    const cardIdMap = new Map();
+    clipboardCards.forEach((card, index) => {
+      if (card.originalId) {
+        cardIdMap.set(card.originalId, pastedCards[index].id);
+      }
+    });
+
+    const connectorsToAdd = clipboardConnectors
+      .filter((connector) => {
+        if (!connector?.source?.cardId || !connector?.target?.cardId) {
+          return false;
+        }
+
+        return (
+          cardIdMap.has(connector.source.cardId) &&
+          cardIdMap.has(connector.target.cardId)
+        );
+      })
+      .map((connector) => {
+        const clone = cloneConnector(connector);
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        return {
+          ...clone,
+          id,
+          source: {
+            ...clone.source,
+            cardId: cardIdMap.get(clone.source.cardId),
+          },
+          target: {
+            ...clone.target,
+            cardId: cardIdMap.get(clone.target.cardId),
+          },
+        };
+      });
 
     recordSnapshot();
     setCards((prev) => [...prev, ...pastedCards]);
 
-    clipboardRef.current = pastedCards.map(({ id, ...rest }) => ({ ...rest }));
+    if (connectorsToAdd.length > 0) {
+      setConnectors((prev) => [...prev, ...connectorsToAdd]);
+    }
+
+    clipboardRef.current = {
+      cards: pastedCards.map(({ id, ...rest }) => ({ ...rest, originalId: id })),
+      connectors: connectorsToAdd.map((connector) => {
+        const { id, ...rest } = cloneConnector(connector);
+        return rest;
+      }),
+    };
 
     const newIds = pastedCards.map((card) => card.id);
     setSelectedCardIds(newIds);
+    setSelectedConnectorIds(connectorsToAdd.map((connector) => connector.id));
     setActiveCardId(newIds[newIds.length - 1] ?? null);
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
@@ -387,15 +590,45 @@ export default function InfiniteCanvas() {
         return;
       }
 
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        startConnectorCreation();
+        return;
+      }
+
       if (
         (event.key === 'Backspace' || event.key === 'Delete') &&
-        selectedCardIds.length > 0
+        (selectedCardIds.length > 0 || selectedConnectorIds.length > 0)
       ) {
         event.preventDefault();
         recordSnapshot();
         const idsToRemove = new Set(selectedCardIds);
-        setCards((prev) => prev.filter((card) => !idsToRemove.has(card.id)));
+        const connectorsToRemove = new Set(selectedConnectorIds);
+        if (idsToRemove.size > 0) {
+          setCards((prev) => prev.filter((card) => !idsToRemove.has(card.id)));
+        }
+        if (idsToRemove.size > 0 || connectorsToRemove.size > 0) {
+          setConnectors((prev) =>
+            prev.filter((connector) => {
+              if (!connector) return false;
+              if (connectorsToRemove.has(connector.id)) {
+                return false;
+              }
+              if (idsToRemove.size === 0) {
+                return true;
+              }
+              if (connector.source?.cardId && idsToRemove.has(connector.source.cardId)) {
+                return false;
+              }
+              if (connector.target?.cardId && idsToRemove.has(connector.target.cardId)) {
+                return false;
+              }
+              return true;
+            })
+          );
+        }
         setSelectedCardIds([]);
+        setSelectedConnectorIds([]);
         setActiveCardId(null);
         setEditingCardId((value) =>
           value && idsToRemove.has(value) ? null : value
@@ -429,6 +662,8 @@ export default function InfiniteCanvas() {
     recordSnapshot,
     redo,
     selectedCardIds,
+    selectedConnectorIds,
+    startConnectorCreation,
     undo,
   ]);
 
@@ -438,11 +673,6 @@ export default function InfiniteCanvas() {
       x: (event.clientX - rect.left - panRef.current.x) / scaleRef.current,
       y: (event.clientY - rect.top - panRef.current.y) / scaleRef.current,
     };
-  }, []);
-
-  const setInteraction = useCallback((interaction) => {
-    interactionRef.current = interaction;
-    setInteractionType(interaction.type);
   }, []);
 
   const findCardAtPoint = useCallback((pointer) => {
@@ -469,6 +699,9 @@ export default function InfiniteCanvas() {
 
       canvas.setPointerCapture?.(event.pointerId);
 
+      const pointer = toWorldSpace(event);
+      const interaction = interactionRef.current;
+
       if (spaceHeld && editingCardId === null) {
         setInteraction({
           type: 'pan',
@@ -480,18 +713,125 @@ export default function InfiniteCanvas() {
         return;
       }
 
-      const pointer = toWorldSpace(event);
+      if (
+        interaction?.type === 'connector-create' &&
+        interaction.stage === 'await-source'
+      ) {
+        const card = findCardAtPoint(pointer);
+        if (!card) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const anchor = calculateConnectorAnchor(card, pointer);
+        const draftId = `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        setDraftConnector({
+          id: draftId,
+          originId: null,
+          source: { cardId: card.id, anchor },
+          target: { cardId: null, anchor: null, absolute: pointer },
+          bends: [],
+        });
+        setSelectedCardIds([]);
+        setSelectedConnectorIds([]);
+        setActiveCardId(null);
+        setInteraction({
+          type: 'connector-create',
+          stage: 'dragging-target',
+          pointerId: event.pointerId,
+          sourceCardId: card.id,
+          sourceAnchor: anchor,
+          draftId,
+          hasSnapshot: false,
+        });
+        return;
+      }
+
+      const connectorHit = findConnectorHit(
+        pointer,
+        connectorsRef.current,
+        cardsRef.current,
+        scaleRef.current
+      );
+
+      if (connectorHit) {
+        const connectorId = connectorHit.connector.id;
+        const additive = event.shiftKey;
+        setActiveCardId(null);
+        setSelectedCardIds([]);
+        setEditingCardId(null);
+        setSelectedConnectorIds((prev) => {
+          if (additive) {
+            const already = prev.includes(connectorId);
+            if (already) {
+              return prev.filter((id) => id !== connectorId);
+            }
+            return [...prev, connectorId];
+          }
+          if (prev.length === 1 && prev[0] === connectorId) {
+            return [...prev];
+          }
+          return [connectorId];
+        });
+
+        if (connectorHit.type === 'endpoint') {
+          const clone = cloneConnector(connectorHit.connector);
+          setDraftConnector({ ...clone, originId: connectorId });
+          setInteraction({
+            type: 'connector-endpoint',
+            pointerId: event.pointerId,
+            connectorId,
+            endpoint: connectorHit.endpoint,
+            hasSnapshot: false,
+          });
+        } else if (connectorHit.type === 'bend') {
+          const clone = cloneConnector(connectorHit.connector);
+          setDraftConnector({ ...clone, originId: connectorId });
+          const bend = connectorHit.connector.bends?.[connectorHit.index];
+          setInteraction({
+            type: 'connector-bend',
+            pointerId: event.pointerId,
+            connectorId,
+            bendIndex: connectorHit.index,
+            offset: bend
+              ? {
+                  x: pointer.x - bend.x,
+                  y: pointer.y - bend.y,
+                }
+              : { x: 0, y: 0 },
+            hasSnapshot: false,
+          });
+        } else if (connectorHit.type === 'segment') {
+          const initial = cloneConnector(connectorHit.connector);
+          setDraftConnector(null);
+          setInteraction({
+            type: 'connector-move',
+            pointerId: event.pointerId,
+            connectorId,
+            startPointer: pointer,
+            initial,
+            hasSnapshot: false,
+          });
+        } else {
+          setDraftConnector(null);
+          setInteraction({ type: 'idle' });
+        }
+        return;
+      }
+
       const card = findCardAtPoint(pointer);
 
       if (!card) {
         setActiveCardId(null);
         setSelectedCardIds([]);
+        setSelectedConnectorIds([]);
         setHoveredCardId(null);
         setInteraction({ type: 'idle' });
         setEditingCardId(null);
         return;
       }
 
+      setSelectedConnectorIds([]);
       setHoveredCardId(card.id);
 
       if (event.shiftKey) {
@@ -569,7 +909,13 @@ export default function InfiniteCanvas() {
         hasSnapshot: false,
       });
     },
-    [editingCardId, findCardAtPoint, setInteraction, spaceHeld, toWorldSpace]
+    [
+      editingCardId,
+      findCardAtPoint,
+      setInteraction,
+      spaceHeld,
+      toWorldSpace,
+    ]
   );
 
   const handlePointerMove = useCallback(
@@ -662,12 +1008,115 @@ export default function InfiniteCanvas() {
               : card
           )
         );
+        return;
+      }
+
+      if (
+        interaction.type === 'connector-create' &&
+        interaction.stage === 'dragging-target'
+      ) {
+        const targetCard = findCardAtPoint(pointer);
+        const sourceCard = cardsRef.current.find(
+          (card) => card.id === interaction.sourceCardId
+        );
+        if (!sourceCard) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const anchor = targetCard
+          ? calculateConnectorAnchor(targetCard, pointer)
+          : null;
+
+        setDraftConnector({
+          id: interaction.draftId,
+          originId: null,
+          source: {
+            cardId: sourceCard.id,
+            anchor: interaction.sourceAnchor,
+          },
+          target: targetCard
+            ? { cardId: targetCard.id, anchor }
+            : { cardId: null, anchor: null, absolute: pointer },
+          bends: [],
+        });
+        return;
+      }
+
+      if (interaction.type === 'connector-endpoint') {
+        prepareHistoryForInteraction();
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (!connector) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const endpointKey = interaction.endpoint === 'source' ? 'source' : 'target';
+        const targetCard = findCardAtPoint(pointer);
+        const previewEndpoint = targetCard
+          ? { cardId: targetCard.id, anchor: calculateConnectorAnchor(targetCard, pointer) }
+          : { cardId: null, anchor: null, absolute: pointer };
+        const clone = cloneConnector(connector);
+        setDraftConnector({
+          ...clone,
+          originId: connector.id,
+          [endpointKey]: previewEndpoint,
+        });
+        return;
+      }
+
+      if (interaction.type === 'connector-move') {
+        prepareHistoryForInteraction();
+        const reference =
+          interaction.initial ??
+          connectorsRef.current.find((item) => item.id === interaction.connectorId);
+        if (!reference) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const delta = {
+          x: pointer.x - interaction.startPointer.x,
+          y: pointer.y - interaction.startPointer.y,
+        };
+
+        const translated = translateConnector(reference, delta);
+        if (translated) {
+          setDraftConnector({ ...translated, originId: interaction.connectorId });
+        } else {
+          setDraftConnector(null);
+        }
+        return;
+      }
+
+      if (interaction.type === 'connector-bend') {
+        prepareHistoryForInteraction();
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (!connector) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const bends = connector.bends ? [...connector.bends] : [];
+        const offset = interaction.offset ?? { x: 0, y: 0 };
+        const nextPoint = {
+          x: pointer.x - offset.x,
+          y: pointer.y - offset.y,
+        };
+        bends[interaction.bendIndex] = nextPoint;
+        const clone = cloneConnector(connector);
+        setDraftConnector({ ...clone, bends, originId: connector.id });
       }
     },
     [findCardAtPoint, prepareHistoryForInteraction, spaceHeld, toWorldSpace]
   );
 
   const clearInteraction = useCallback(() => {
+    setDraftConnector(null);
     setInteraction({ type: 'idle' });
   }, [setInteraction]);
 
@@ -676,9 +1125,157 @@ export default function InfiniteCanvas() {
       if (event?.pointerId != null) {
         canvasRef.current?.releasePointerCapture?.(event.pointerId);
       }
+      const interaction = interactionRef.current;
+
+      if (
+        interaction?.type === 'connector-create' &&
+        interaction.stage === 'dragging-target'
+      ) {
+        const pointer = toWorldSpace(event);
+        const sourceCard = cardsRef.current.find(
+          (card) => card.id === interaction.sourceCardId
+        );
+        const targetCard = findCardAtPoint(pointer);
+
+        if (sourceCard && targetCard) {
+          const anchor = calculateConnectorAnchor(targetCard, pointer);
+          const newConnector = {
+            id: `connector-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            source: {
+              cardId: sourceCard.id,
+              anchor: interaction.sourceAnchor,
+            },
+            target: {
+              cardId: targetCard.id,
+              anchor,
+            },
+            bends: [],
+          };
+          recordSnapshot();
+          setConnectors((prev) => [...prev, newConnector]);
+          setSelectedConnectorIds([newConnector.id]);
+          setSelectedCardIds([]);
+          setActiveCardId(null);
+        }
+
+        setDraftConnector(null);
+        setInteraction({
+          type: 'connector-create',
+          stage: 'await-source',
+          hasSnapshot: false,
+        });
+        return;
+      }
+
+      if (interaction?.type === 'connector-endpoint') {
+        const pointer = toWorldSpace(event);
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (connector) {
+          const endpointKey = interaction.endpoint === 'source' ? 'source' : 'target';
+          const targetCard = findCardAtPoint(pointer);
+          if (targetCard) {
+            const anchor = calculateConnectorAnchor(targetCard, pointer);
+            const previous = connector[endpointKey];
+            const hasChanged =
+              previous?.cardId !== targetCard.id ||
+              !anchorsEqual(previous?.anchor, anchor);
+
+            if (hasChanged) {
+              recordSnapshot();
+              setConnectors((prev) =>
+                prev.map((item) =>
+                  item.id === connector.id
+                    ? {
+                        ...item,
+                        [endpointKey]: { cardId: targetCard.id, anchor },
+                      }
+                    : item
+                )
+              );
+            }
+          }
+        }
+
+        clearInteraction();
+        return;
+      }
+
+      if (interaction?.type === 'connector-move') {
+        const pointer = toWorldSpace(event);
+        const reference =
+          interaction.initial ??
+          connectorsRef.current.find((item) => item.id === interaction.connectorId);
+
+        if (reference) {
+          const delta = {
+            x: pointer.x - interaction.startPointer.x,
+            y: pointer.y - interaction.startPointer.y,
+          };
+
+          const translated = translateConnector(reference, delta);
+          if (translated && connectorTranslationChanged(reference, translated)) {
+            prepareHistoryForInteraction();
+            setConnectors((prev) =>
+              prev.map((item) =>
+                item.id === interaction.connectorId ? translated : item
+              )
+            );
+          }
+        }
+
+        clearInteraction();
+        return;
+      }
+
+      if (interaction?.type === 'connector-bend') {
+        const pointer = toWorldSpace(event);
+        const connector = connectorsRef.current.find(
+          (item) => item.id === interaction.connectorId
+        );
+        if (connector) {
+          const offset = interaction.offset ?? { x: 0, y: 0 };
+          const nextPoint = {
+            x: pointer.x - offset.x,
+            y: pointer.y - offset.y,
+          };
+          const currentPoint = connector.bends?.[interaction.bendIndex];
+          if (
+            !currentPoint ||
+            Math.abs(currentPoint.x - nextPoint.x) > 0.01 ||
+            Math.abs(currentPoint.y - nextPoint.y) > 0.01
+          ) {
+            recordSnapshot();
+            setConnectors((prev) =>
+              prev.map((item) => {
+                if (item.id !== connector.id) {
+                  return item;
+                }
+                const existing = item.bends ? [...item.bends] : [];
+                existing[interaction.bendIndex] = nextPoint;
+                return {
+                  ...item,
+                  bends: existing,
+                };
+              })
+            );
+          }
+        }
+
+        clearInteraction();
+        return;
+      }
+
       clearInteraction();
     },
-    [clearInteraction]
+    [
+      clearInteraction,
+      findCardAtPoint,
+      prepareHistoryForInteraction,
+      recordSnapshot,
+      toWorldSpace,
+    ]
   );
 
   const handlePointerLeave = useCallback(
@@ -793,6 +1390,34 @@ export default function InfiniteCanvas() {
       ctx.translate(pan.x, pan.y);
       ctx.scale(scale, scale);
 
+      const cardMap = new Map();
+      for (const card of cards) {
+        cardMap.set(card.id, card);
+      }
+
+      const blockedConnectorId = draftConnector?.originId ?? null;
+
+      for (const connector of connectors) {
+        if (blockedConnectorId && connector.id === blockedConnectorId) {
+          continue;
+        }
+
+        drawConnector(ctx, connector, {
+          cardMap,
+          selected: selectedConnectorIds.includes(connector.id),
+          scale,
+        });
+      }
+
+      if (draftConnector) {
+        drawConnector(ctx, draftConnector, {
+          cardMap,
+          selected: true,
+          scale,
+          isDraft: true,
+        });
+      }
+
       const selectedCount = selectedCardIds.length;
 
       for (const card of cards) {
@@ -826,6 +1451,7 @@ export default function InfiniteCanvas() {
     };
   }, [
     cards,
+    connectors,
     activeCardId,
     editingCardId,
     hoveredCardId,
@@ -833,6 +1459,8 @@ export default function InfiniteCanvas() {
     scale,
     handleAnimationVersion,
     selectedCardIds,
+    selectedConnectorIds,
+    draftConnector,
   ]);
 
   const handleTextChange = useCallback(
@@ -1014,6 +1642,7 @@ export default function InfiniteCanvas() {
 
     setActiveCardId(null);
     setSelectedCardIds([]);
+    setSelectedConnectorIds([]);
     setEditingCardId(null);
   }, [hoveredCardId, interactionType]);
 
@@ -1164,7 +1793,10 @@ export default function InfiniteCanvas() {
         </div>
       )}
 
-      <PillNavigation onAddCard={addCard} />
+      <PillNavigation
+        onAddCard={addCard}
+        onStartConnector={startConnectorCreation}
+      />
     </div>
   );
 }
@@ -1199,6 +1831,425 @@ function drawGrid(ctx, rect, { pan, scale }) {
     }
   }
 
+  ctx.restore();
+}
+
+function cloneConnector(connector) {
+  if (!connector) {
+    return {
+      id: '',
+      source: { cardId: null, anchor: null },
+      target: { cardId: null, anchor: null },
+      bends: [],
+    };
+  }
+
+  const cloneEnd = (end) => {
+    if (!end) {
+      return { cardId: null, anchor: null };
+    }
+
+    const next = {
+      cardId: end.cardId ?? null,
+      anchor: end.anchor ? { ...end.anchor } : null,
+    };
+
+    if (end.absolute) {
+      next.absolute = { ...end.absolute };
+    }
+
+    return next;
+  };
+
+  return {
+    id: connector.id,
+    source: cloneEnd(connector.source),
+    target: cloneEnd(connector.target),
+    bends: Array.isArray(connector.bends)
+      ? connector.bends.map((bend) => ({ ...bend }))
+      : [],
+  };
+}
+
+function calculateConnectorAnchor(card, point) {
+  if (!card || !card.width || !card.height) {
+    return { x: 0.5, y: 0.5 };
+  }
+
+  const candidates = [
+    {
+      anchor: { x: 0, y: 0.5 },
+      position: { x: card.x, y: card.y + card.height / 2 },
+    },
+    {
+      anchor: { x: 1, y: 0.5 },
+      position: { x: card.x + card.width, y: card.y + card.height / 2 },
+    },
+    {
+      anchor: { x: 0.5, y: 0 },
+      position: { x: card.x + card.width / 2, y: card.y },
+    },
+    {
+      anchor: { x: 0.5, y: 1 },
+      position: { x: card.x + card.width / 2, y: card.y + card.height },
+    },
+  ];
+
+  candidates.sort((a, b) => {
+    const distanceA = Math.hypot(point.x - a.position.x, point.y - a.position.y);
+    const distanceB = Math.hypot(point.x - b.position.x, point.y - b.position.y);
+    return distanceA - distanceB;
+  });
+
+  const chosen = candidates[0]?.anchor ?? { x: 0.5, y: 0.5 };
+  return {
+    x: clamp(chosen.x, 0, 1),
+    y: clamp(chosen.y, 0, 1),
+  };
+}
+
+function anchorsEqual(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001;
+}
+
+function getAnchorNormal(anchor) {
+  if (!anchor) {
+    return { x: 0, y: -1 };
+  }
+
+  const threshold = 0.001;
+  let normalX = 0;
+  let normalY = 0;
+
+  if (anchor.x <= threshold) normalX = -1;
+  else if (anchor.x >= 1 - threshold) normalX = 1;
+
+  if (anchor.y <= threshold) normalY = -1;
+  else if (anchor.y >= 1 - threshold) normalY = 1;
+
+  if (normalX === 0 && normalY === 0) {
+    if (anchor.x < 0.5 - threshold) normalX = -1;
+    else if (anchor.x > 0.5 + threshold) normalX = 1;
+
+    if (anchor.y < 0.5 - threshold) normalY = -1;
+    else if (anchor.y > 0.5 + threshold) normalY = 1;
+  }
+
+  const length = Math.hypot(normalX, normalY);
+  if (length === 0) {
+    return { x: 0, y: -1 };
+  }
+
+  return { x: normalX / length, y: normalY / length };
+}
+
+function offsetPointFromCard(point, anchor) {
+  const normal = getAnchorNormal(anchor);
+  return {
+    x: point.x + normal.x * CONNECTOR_CARD_OFFSET,
+    y: point.y + normal.y * CONNECTOR_CARD_OFFSET,
+  };
+}
+
+function translateConnector(connector, delta) {
+  if (!connector || !delta) {
+    return null;
+  }
+
+  const next = cloneConnector(connector);
+
+  next.source = translateConnectorEnd(next.source, delta);
+  next.target = translateConnectorEnd(next.target, delta);
+
+  if (Array.isArray(next.bends) && next.bends.length > 0) {
+    next.bends = next.bends.map((bend) => ({
+      x: bend.x + delta.x,
+      y: bend.y + delta.y,
+    }));
+  }
+
+  return next;
+}
+
+function translateConnectorEnd(end, delta) {
+  if (!end) {
+    return { cardId: null, anchor: null };
+  }
+
+  if (end.cardId) {
+    return {
+      cardId: end.cardId,
+      anchor: end.anchor ? { ...end.anchor } : null,
+    };
+  }
+
+  const absolute = end.absolute ?? { x: 0, y: 0 };
+
+  return {
+    cardId: null,
+    anchor: null,
+    absolute: {
+      x: absolute.x + delta.x,
+      y: absolute.y + delta.y,
+    },
+  };
+}
+
+function connectorTranslationChanged(original, translated) {
+  if (!original || !translated) {
+    return false;
+  }
+
+  if (connectorEndsDiffer(original.source, translated.source)) {
+    return true;
+  }
+
+  if (connectorEndsDiffer(original.target, translated.target)) {
+    return true;
+  }
+
+  const originalBends = Array.isArray(original.bends) ? original.bends : [];
+  const translatedBends = Array.isArray(translated.bends) ? translated.bends : [];
+
+  if (originalBends.length !== translatedBends.length) {
+    return true;
+  }
+
+  for (let index = 0; index < originalBends.length; index += 1) {
+    const sourceBend = originalBends[index];
+    const targetBend = translatedBends[index];
+    if (
+      !sourceBend ||
+      !targetBend ||
+      Math.abs(sourceBend.x - targetBend.x) > 0.01 ||
+      Math.abs(sourceBend.y - targetBend.y) > 0.01
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function connectorEndsDiffer(a, b) {
+  if (!a && !b) {
+    return false;
+  }
+
+  if (!a || !b) {
+    return true;
+  }
+
+  if (a.cardId || b.cardId) {
+    return (a.cardId ?? null) !== (b.cardId ?? null) || !anchorsEqual(a.anchor, b.anchor);
+  }
+
+  const source = a.absolute ?? { x: 0, y: 0 };
+  const target = b.absolute ?? { x: 0, y: 0 };
+
+  return (
+    Math.abs(source.x - target.x) > 0.01 || Math.abs(source.y - target.y) > 0.01
+  );
+}
+
+function resolveConnectorEndPosition(end, cardMap) {
+  if (!end) {
+    return { point: null, attached: false };
+  }
+
+  if (end.cardId && end.anchor) {
+    const card = cardMap.get(end.cardId);
+    if (card) {
+      const anchor = end.anchor;
+      const anchorPoint = {
+        x: card.x + card.width * anchor.x,
+        y: card.y + card.height * anchor.y,
+      };
+      return {
+        point: offsetPointFromCard(anchorPoint, anchor),
+        attached: true,
+      };
+    }
+  }
+
+  if (end.absolute) {
+    return { point: { ...end.absolute }, attached: false };
+  }
+
+  return { point: null, attached: false };
+}
+
+function getConnectorGeometry(connector, cardMap) {
+  const start = resolveConnectorEndPosition(connector?.source, cardMap);
+  const end = resolveConnectorEndPosition(connector?.target, cardMap);
+  const points = [];
+
+  if (start.point) {
+    points.push(start.point);
+  }
+
+  if (Array.isArray(connector?.bends)) {
+    for (const bend of connector.bends) {
+      if (bend && typeof bend.x === 'number' && typeof bend.y === 'number') {
+        points.push({ x: bend.x, y: bend.y });
+      }
+    }
+  }
+
+  if (end.point) {
+    points.push(end.point);
+  }
+
+  return { points, start, end };
+}
+
+function findConnectorHit(pointer, connectors, cards, scale) {
+  if (!Array.isArray(connectors) || connectors.length === 0) {
+    return null;
+  }
+
+  const cardMap = new Map();
+  if (Array.isArray(cards)) {
+    for (const card of cards) {
+      cardMap.set(card.id, card);
+    }
+  }
+
+  const effectiveScale = Math.max(scale ?? 1, 0.01);
+  const handleRadius = CONNECTOR_HANDLE_RADIUS / effectiveScale;
+  const segmentThreshold = CONNECTOR_HIT_DISTANCE / effectiveScale;
+
+  for (let index = connectors.length - 1; index >= 0; index -= 1) {
+    const connector = connectors[index];
+    if (!connector) continue;
+
+    const { points } = getConnectorGeometry(connector, cardMap);
+    if (points.length < 2) {
+      continue;
+    }
+
+    const startPoint = points[0];
+    const endPoint = points[points.length - 1];
+
+    if (
+      Math.hypot(pointer.x - startPoint.x, pointer.y - startPoint.y) <=
+      handleRadius
+    ) {
+      return { type: 'endpoint', connector, endpoint: 'source' };
+    }
+
+    if (
+      Math.hypot(pointer.x - endPoint.x, pointer.y - endPoint.y) <=
+      handleRadius
+    ) {
+      return { type: 'endpoint', connector, endpoint: 'target' };
+    }
+
+    if (Array.isArray(connector.bends)) {
+      for (let bendIndex = connector.bends.length - 1; bendIndex >= 0; bendIndex -= 1) {
+        const bend = connector.bends[bendIndex];
+        if (!bend) continue;
+        if (Math.hypot(pointer.x - bend.x, pointer.y - bend.y) <= handleRadius) {
+          return { type: 'bend', connector, index: bendIndex };
+        }
+      }
+    }
+
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const distance = distanceToSegment(pointer, points[i], points[i + 1]);
+      if (distance <= segmentThreshold) {
+        return { type: 'segment', connector };
+      }
+    }
+  }
+
+  return null;
+}
+
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+
+  const t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy);
+  const clamped = Math.max(0, Math.min(1, t));
+  const closest = {
+    x: start.x + clamped * dx,
+    y: start.y + clamped * dy,
+  };
+
+  return Math.hypot(point.x - closest.x, point.y - closest.y);
+}
+
+function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = false }) {
+  const { points } = getConnectorGeometry(connector, cardMap);
+  if (points.length < 2) {
+    return;
+  }
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = selected ? '#2563EB' : '#1F2937';
+  const effectiveScale = Math.max(scale ?? 1, 0.01);
+  ctx.lineWidth =
+    (selected ? CONNECTOR_SELECTED_LINE_WIDTH : CONNECTOR_LINE_WIDTH) /
+    effectiveScale;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.stroke();
+
+  const capColor = selected ? '#2563EB' : '#1F2937';
+  drawConnectorCap(ctx, points[0], capColor, effectiveScale);
+  drawConnectorCap(ctx, points[points.length - 1], capColor, effectiveScale);
+
+  if (selected || isDraft) {
+    ctx.fillStyle = selected ? '#2563EB' : '#1F2937';
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1.5 / effectiveScale;
+
+    const handlePoints = [points[0]];
+    if (Array.isArray(connector.bends)) {
+      for (const bend of connector.bends) {
+        if (bend && typeof bend.x === 'number' && typeof bend.y === 'number') {
+          handlePoints.push(bend);
+        }
+      }
+    }
+    handlePoints.push(points[points.length - 1]);
+
+    for (const point of handlePoints) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, CONNECTOR_HANDLE_RADIUS / effectiveScale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawConnectorCap(ctx, point, color, scale = 1) {
+  if (!point) {
+    return;
+  }
+
+  const effectiveScale = Math.max(scale, 0.01);
+  const radius = CONNECTOR_CAP_RADIUS / effectiveScale;
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
