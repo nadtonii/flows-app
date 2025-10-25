@@ -21,17 +21,17 @@ export default function LandingPage({ onTryItNow }) {
           display: 'flex',
           flexDirection: 'column',
           gap: '32px',
-          height: '100%',
-          justifyContent: 'center',
+          height: 'fit-content',
+          justifyContent: 'start',
           left: '0',
           overflowWrap: 'break-word',
           paddingBlock: 0,
           paddingInline: 0,
           position: 'fixed',
           top: '0',
-          transform: 'translate(0px, 0px)',
+          transform: 'translate(556px, 416px)',
           transformOrigin: '0% 0%',
-          width: '100%',
+          width: 'fit-content',
         }}
       >
         <div
@@ -151,52 +151,28 @@ export default function LandingPage({ onTryItNow }) {
       </div>
       <div
         style={{
-          alignItems: 'start',
           boxSizing: 'border-box',
-          contain: 'layout',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 0,
-          height: '1024px',
-          justifyContent: 'end',
+          color: '#797979',
+          fontFamily: '"Inter", system-ui, sans-serif',
+          fontSize: '14px',
+          fontSynthesis: 'none',
+          fontWeight: 500,
+          height: 'fit-content',
           left: '0',
-          overflowWrap: 'break-word',
-          paddingBlock: '32px',
-          paddingInline: 0,
+          letterSpacing: '-0.04em',
+          lineHeight: '150%',
+          MozOsxFontSmoothing: 'grayscale',
           position: 'fixed',
+          textAlign: 'center',
           top: '0',
-          transform: 'translate(0px, 0px)',
+          transform: 'translate(545.0000176757812px, 922px)',
           transformOrigin: '0% 0%',
-          width: '100%',
+          WebkitFontSmoothing: 'antialiased',
+          whiteSpace: 'pre-wrap',
+          width: '350px',
         }}
       >
-        <div
-          style={{
-            alignContent: 'end',
-            alignSelf: 'stretch',
-            boxSizing: 'border-box',
-            color: '#797979',
-            flex: '1 0 0px',
-            flexBasis: '0px',
-            flexGrow: '1',
-            flexShrink: '0',
-            fontFamily: '"Inter", system-ui, sans-serif',
-            fontSize: '14px',
-            fontSynthesis: 'none',
-            fontWeight: 500,
-            height: 'auto',
-            letterSpacing: '-0.04em',
-            lineHeight: '150%',
-            MozOsxFontSmoothing: 'grayscale',
-            textAlign: 'center',
-            transformOrigin: '50% 50%',
-            WebkitFontSmoothing: 'antialiased',
-            whiteSpace: 'pre-wrap',
-            width: 'auto',
-          }}
-        >
-          *Flows is in early alpha and features such as saving are not supported yet.
-        </div>
+        *Flows is in early alpha and features such as saving are not supported yet.
       </div>
     </div>
   );
