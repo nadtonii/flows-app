@@ -21,3 +21,67 @@ body {
 a {
   color: inherit;
 }
+
+.app-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #f7f7f7;
+  overflow: hidden;
+}
+
+.app-stage__screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 400ms ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-stage__screen > * {
+  flex: 1 1 auto;
+}
+
+.app-stage__screen--landing {
+  z-index: 2;
+}
+
+.app-stage__screen--canvas {
+  z-index: 1;
+}
+
+.app-stage__screen--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-stage__screen--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.onboarding-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  transition: opacity 320ms ease;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.onboarding-overlay--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.onboarding-overlay--hiding {
+  opacity: 0;
+  pointer-events: none;
+}
