@@ -1,14 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import PillNavigation from './PillNavigation.jsx';
 
 const DEFAULT_CARD = {
-  width: 240,
-  height: 140,
+  width: 580,
+  height: 580,
 };
 
 const MIN_CARD_WIDTH = 120;
 const MIN_CARD_HEIGHT = 80;
-const MAX_CARD_HEIGHT = 480;
+const MAX_CARD_HEIGHT = 580;
 const HANDLE_SIZE = 18;
 const HANDLE_RADIUS = HANDLE_SIZE / 2;
 const HANDLE_MARGIN = 6;
@@ -50,10 +57,15 @@ export default function InfiniteCanvas() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [interactionType, setInteractionType] = useState('idle');
+  const [editingPadding, setEditingPadding] = useState(0);
+  const [handleAnimationVersion, setHandleAnimationVersion] = useState(0);
 
   const cardsRef = useRef(cards);
   const panRef = useRef(pan);
   const scaleRef = useRef(scale);
+  const textareaRef = useRef(null);
+  const handleVisibilityRef = useRef(new Map());
+  const handleAnimationRef = useRef(null);
 
   useEffect(() => {
     cardsRef.current = cards;
@@ -391,6 +403,7 @@ export default function InfiniteCanvas() {
           isActive: card.id === activeCardId,
           isEditing: card.id === editingCardId,
           isHovered: card.id === hoveredCardId,
+          handleAlpha: handleVisibilityRef.current.get(card.id),
         });
       }
 
@@ -412,13 +425,25 @@ export default function InfiniteCanvas() {
     return () => {
       window.removeEventListener('resize', resize);
     };
-  }, [cards, activeCardId, editingCardId, hoveredCardId, pan, scale]);
+  }, [
+    cards,
+    activeCardId,
+    editingCardId,
+    hoveredCardId,
+    pan,
+    scale,
+    handleAnimationVersion,
+  ]);
 
   const handleTextChange = useCallback(
     (event) => {
       const value = event.target.value;
       const approxLines = value.split('\n').length + Math.floor(value.length / 28);
-      const desiredHeight = clamp(approxLines * 22 + 48, MIN_CARD_HEIGHT, MAX_CARD_HEIGHT);
+      const desiredHeight = clamp(
+        approxLines * 22 + 48,
+        MIN_CARD_HEIGHT,
+        MAX_CARD_HEIGHT
+      );
 
       setCards((prev) =>
         prev.map((card) =>
@@ -427,7 +452,7 @@ export default function InfiniteCanvas() {
                 ...card,
                 text: value,
                 isPlaceholder: value.trim().length === 0,
-                height: desiredHeight,
+                height: Math.max(card.height, desiredHeight),
               }
             : card
         )
@@ -445,6 +470,92 @@ export default function InfiniteCanvas() {
       height: Math.max(48, editingCard.height * scale - 32),
     };
   }, [editingCard, pan, scale]);
+
+  useLayoutEffect(() => {
+    if (!editingCard || !textareaPosition) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const available = textareaPosition.height;
+    if (available <= 0) return;
+
+    const previousHeight = textarea.style.height;
+    textarea.style.height = 'auto';
+
+    const computed = window.getComputedStyle(textarea);
+    const paddingTop = parseFloat(computed.paddingTop) || 0;
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0;
+    const contentHeight = textarea.scrollHeight - paddingTop - paddingBottom;
+    const offset = Math.max(0, (available - contentHeight) / 2);
+
+    setEditingPadding((prev) => (Math.abs(prev - offset) < 0.5 ? prev : offset));
+
+    textarea.style.height = `${available}px`;
+
+    return () => {
+      textarea.style.height = previousHeight;
+    };
+  }, [
+    editingCard?.text,
+    scale,
+    textareaPosition?.height,
+    editingCard,
+    textareaPosition,
+    editingPadding,
+  ]);
+
+  useEffect(() => {
+    const visibilityMap = handleVisibilityRef.current;
+
+    for (const card of cards) {
+      if (!visibilityMap.has(card.id)) {
+        const shouldShow = card.id === activeCardId || card.id === hoveredCardId;
+        visibilityMap.set(card.id, shouldShow ? 1 : 0);
+      }
+    }
+
+    for (const key of [...visibilityMap.keys()]) {
+      if (!cardsRef.current.some((card) => card.id === key)) {
+        visibilityMap.delete(key);
+      }
+    }
+
+    const animate = () => {
+      const currentMap = handleVisibilityRef.current;
+      let hasChanges = false;
+
+      for (const card of cardsRef.current) {
+        const target =
+          card.id === activeCardId || card.id === hoveredCardId ? 1 : 0;
+        const current = currentMap.get(card.id) ?? target;
+        const next = current + (target - current) * 0.2;
+        const finalValue = Math.abs(next - target) < 0.01 ? target : next;
+
+        if (Math.abs(finalValue - current) > 0.001) {
+          currentMap.set(card.id, finalValue);
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        setHandleAnimationVersion((value) => value + 1);
+        handleAnimationRef.current = requestAnimationFrame(animate);
+      } else {
+        handleAnimationRef.current = null;
+      }
+    };
+
+    if (!handleAnimationRef.current) {
+      handleAnimationRef.current = requestAnimationFrame(animate);
+    }
+
+    return () => {
+      if (handleAnimationRef.current) {
+        cancelAnimationFrame(handleAnimationRef.current);
+        handleAnimationRef.current = null;
+      }
+    };
+  }, [activeCardId, hoveredCardId, cards]);
 
   const handleCanvasClick = useCallback(() => {
     if (hoveredCardId || interactionType === 'drag' || interactionType === 'resize') {
@@ -490,6 +601,7 @@ export default function InfiniteCanvas() {
       {editingCard && textareaPosition && (
         <textarea
           key={editingCard.id}
+          ref={textareaRef}
           autoFocus
           value={editingCard.text}
           placeholder="Card"
@@ -515,7 +627,11 @@ export default function InfiniteCanvas() {
             whiteSpace: 'pre-wrap',
             lineHeight: '22px',
             outline: 'none',
-            padding: 0,
+            paddingTop: editingPadding,
+            paddingBottom: editingPadding,
+            paddingLeft: 0,
+            paddingRight: 0,
+            overflow: 'hidden',
             zIndex: 10,
           }}
         />
@@ -559,7 +675,7 @@ function drawGrid(ctx, rect, { pan, scale }) {
   ctx.restore();
 }
 
-function drawCard(ctx, card, { isActive, isEditing, isHovered }) {
+function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
   const radius = 18;
   const { x, y, width, height } = card;
 
@@ -621,10 +737,12 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered }) {
     ctx.restore();
   }
 
-  const shouldShowHandle = isActive || isHovered;
+  const visibility =
+    handleAlpha != null ? handleAlpha : isActive || isHovered ? 1 : 0;
 
-  if (shouldShowHandle) {
+  if (visibility > 0.01) {
     ctx.save();
+    ctx.globalAlpha = visibility;
     ctx.fillStyle = '#111';
     ctx.beginPath();
     const handleCenter = getHandleCenter(card);
