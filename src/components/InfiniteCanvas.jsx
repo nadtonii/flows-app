@@ -18,12 +18,47 @@ const COLOR_OPTIONS = [
   { id: 'lavender', label: 'Lavender', color: '#F5F3FF', textColor: '#4C1D95' },
 ];
 
+const DEFAULT_TEXT_FORMATTING = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strikethrough: false,
+};
+
 const DEFAULT_CARD = {
   width: 300,
   height: 300,
   color: COLOR_OPTIONS[0].color,
   textColor: COLOR_OPTIONS[0].textColor,
+  formatting: { ...DEFAULT_TEXT_FORMATTING },
 };
+
+const TEXT_FORMAT_OPTIONS = [
+  {
+    id: 'bold',
+    label: 'Bold',
+    symbol: 'B',
+    style: { fontWeight: 700 },
+  },
+  {
+    id: 'italic',
+    label: 'Italic',
+    symbol: 'I',
+    style: { fontStyle: 'italic' },
+  },
+  {
+    id: 'underline',
+    label: 'Underline',
+    symbol: 'U',
+    style: { textDecoration: 'underline' },
+  },
+  {
+    id: 'strikethrough',
+    label: 'Strikethrough',
+    symbol: 'S',
+    style: { textDecoration: 'line-through' },
+  },
+];
 
 const MIN_CARD_WIDTH = 120;
 const MIN_CARD_HEIGHT = 80;
@@ -43,6 +78,25 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function ensureFormatting(formatting) {
+  return { ...DEFAULT_TEXT_FORMATTING, ...(formatting ?? {}) };
+}
+
+function createFontString(formatting, fontSize) {
+  const resolved = ensureFormatting(formatting);
+  const fontStyle = resolved.italic ? 'italic ' : '';
+  const fontWeight = resolved.bold ? '700' : '600';
+  return `${fontStyle}${fontWeight} ${fontSize}px "Inter", sans-serif`;
+}
+
+function getTextDecoration(formatting) {
+  const resolved = ensureFormatting(formatting);
+  const decorations = [];
+  if (resolved.underline) decorations.push('underline');
+  if (resolved.strikethrough) decorations.push('line-through');
+  return decorations.length > 0 ? decorations.join(' ') : 'none';
+}
+
 function createCard({ x, y }) {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -54,6 +108,7 @@ function createCard({ x, y }) {
     isPlaceholder: true,
     color: DEFAULT_CARD.color,
     textColor: DEFAULT_CARD.textColor,
+    formatting: { ...DEFAULT_TEXT_FORMATTING },
   };
 }
 
@@ -434,7 +489,8 @@ export default function InfiniteCanvas() {
       ctx,
       editingCard.text,
       editingCard.width,
-      editingCard.height
+      editingCard.height,
+      editingCard.formatting
     );
   }, [editingCard, getMeasurementContext]);
 
@@ -520,7 +576,8 @@ export default function InfiniteCanvas() {
               ctx,
               value,
               card.width,
-              card.height
+              card.height,
+              card.formatting
             );
 
             if (!layout.fitsWithin) {
@@ -569,6 +626,56 @@ export default function InfiniteCanvas() {
     );
   }, []);
 
+  const handleTextFormattingToggle = useCallback(
+    (key) => {
+      if (!editingCardId) return;
+      const ctx = getMeasurementContext();
+
+      setCards((prev) =>
+        prev.map((card) => {
+          if (card.id !== editingCardId) {
+            return card;
+          }
+
+          const currentFormatting = ensureFormatting(card.formatting);
+          const nextFormatting = {
+            ...currentFormatting,
+            [key]: !currentFormatting[key],
+          };
+
+          let nextHeight = card.height;
+
+          if (ctx) {
+            const layout = calculateCardTypography(
+              ctx,
+              card.text,
+              card.width,
+              card.height,
+              nextFormatting
+            );
+
+            if (!layout.fitsWithin) {
+              const contentHeight = layout.totalHeight + CARD_TEXT_INSET * 2;
+              const desiredHeight = clamp(
+                contentHeight,
+                MIN_CARD_HEIGHT,
+                MAX_CARD_HEIGHT
+              );
+              nextHeight = Math.max(card.height, desiredHeight);
+            }
+          }
+
+          return {
+            ...card,
+            formatting: nextFormatting,
+            height: nextHeight,
+          };
+        })
+      );
+    },
+    [editingCardId, getMeasurementContext]
+  );
+
   const textareaPosition = useMemo(() => {
     if (!editingCard) return null;
     return {
@@ -578,6 +685,11 @@ export default function InfiniteCanvas() {
       height: Math.max(48, editingCard.height * scale - CARD_TEXT_INSET * 2),
     };
   }, [editingCard, pan, scale]);
+
+  const toolbarMode = editingCard ? 'text' : activeCard ? 'color' : null;
+  const toolbarFormatting = editingCard
+    ? ensureFormatting(editingCard.formatting)
+    : ensureFormatting(activeCard?.formatting);
 
   useLayoutEffect(() => {
     if (!editingCard || !textareaPosition) return;
@@ -726,7 +838,9 @@ export default function InfiniteCanvas() {
               (editingTypography
                 ? editingTypography.fontSize
                 : CARD_TEXT_MAX_FONT_SIZE) * scale,
-            fontWeight: 600,
+            fontWeight: editingCard.formatting?.bold ? 700 : 600,
+            fontStyle: editingCard.formatting?.italic ? 'italic' : 'normal',
+            textDecoration: getTextDecoration(editingCard.formatting),
             fontFamily: 'Inter, sans-serif',
             textAlign: 'center',
             border: 'none',
@@ -756,65 +870,197 @@ export default function InfiniteCanvas() {
         />
       )}
 
-      {activeCard && toolbarPosition && (
-        <div
-          style={{
-            position: 'absolute',
-            left: toolbarPosition.left,
-            top: toolbarPosition.top,
-            transform: 'translate(-50%, -100%) translateY(-16px)',
-            display: 'flex',
-            gap: 8,
-            padding: '10px 16px',
-            borderRadius: 9999,
-            background: 'rgba(255, 255, 255, 0.96)',
-            boxShadow: 'none',
-            alignItems: 'center',
-            zIndex: 20,
-            border: '1px solid rgba(15, 23, 42, 0.08)',
-          }}
-        >
-          {COLOR_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => handleCardColorChange(activeCard.id, option)}
-              aria-label={`Set card color to ${option.label}`}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: '9999px',
-                border:
-                  option.id === 'white'
-                    ? '1px solid rgba(15, 23, 42, 0.16)'
-                    : '1px solid transparent',
-                padding: 0,
-                background: option.color,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow:
-                  activeCard.color === option.color
-                    ? '0 0 0 4px rgba(37, 99, 235, 0.18)'
-                    : '0 1px 2px rgba(15, 23, 42, 0.12)',
-                transition:
-                  'transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease',
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.transform = 'scale(1.1)';
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.transform = 'scale(1)';
-              }}
-            >
-            </button>
-          ))}
-        </div>
+      {toolbarMode && activeCard && toolbarPosition && (
+        <FloatingToolbar position={toolbarPosition} mode={toolbarMode}>
+          {toolbarMode === 'color' ? (
+            <ColorToolbar
+              activeCard={activeCard}
+              onSelectColor={handleCardColorChange}
+            />
+          ) : (
+            editingCard && (
+              <TextToolbar
+                formatting={toolbarFormatting}
+                onToggle={handleTextFormattingToggle}
+              />
+            )
+          )}
+        </FloatingToolbar>
       )}
 
       <PillNavigation onAddCard={addCard} />
     </div>
+  );
+}
+
+function FloatingToolbar({ position, mode, children }) {
+  const containerRef = useRef(null);
+  const [size, setSize] = useState(null);
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const updateSize = () => {
+      const rect = node.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
+
+    updateSize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateSize);
+    return () => {
+      window.removeEventListener('resize', updateSize);
+    };
+  }, [mode]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: position.left,
+        top: position.top,
+        transform: 'translate(-50%, -100%) translateY(-16px)',
+        zIndex: 20,
+        pointerEvents: 'auto',
+      }}
+    >
+      <div
+        style={{
+          width: size ? size.width : 'auto',
+          height: size ? size.height : 'auto',
+          transition:
+            'width 220ms cubic-bezier(0.22, 1, 0.36, 1), height 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          position: 'relative',
+        }}
+      >
+        <div
+          ref={containerRef}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 16px',
+            borderRadius: 9999,
+            background: 'rgba(255, 255, 255, 0.96)',
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.12)',
+            transition:
+              'gap 220ms cubic-bezier(0.22, 1, 0.36, 1), padding 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColorToolbar({ activeCard, onSelectColor }) {
+  return (
+    <>
+      {COLOR_OPTIONS.map((option) => {
+        const isActive = activeCard.color === option.color;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onSelectColor(activeCard.id, option)}
+            aria-label={`Set card color to ${option.label}`}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '9999px',
+              border:
+                option.id === 'white'
+                  ? '1px solid rgba(15, 23, 42, 0.16)'
+                  : '1px solid transparent',
+              padding: 0,
+              background: option.color,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: isActive
+                ? '0 0 0 4px rgba(37, 99, 235, 0.18)'
+                : '0 1px 2px rgba(15, 23, 42, 0.12)',
+              transform: 'scale(1)',
+              transition:
+                'transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.transform = 'scale(1.08)';
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.transform = 'scale(1)';
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function TextToolbar({ formatting, onToggle }) {
+  return (
+    <>
+      {TEXT_FORMAT_OPTIONS.map((option) => {
+        const isActive = Boolean(formatting?.[option.id]);
+        return (
+          <button
+            key={option.id}
+            type="button"
+            aria-pressed={isActive}
+            onClick={() => onToggle(option.id)}
+            aria-label={`Toggle ${option.label}`}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              border: isActive
+                ? '1px solid rgba(37, 99, 235, 0.32)'
+                : '1px solid rgba(148, 163, 184, 0.28)',
+              background: isActive
+                ? 'rgba(59, 130, 246, 0.14)'
+                : 'rgba(148, 163, 184, 0.12)',
+              color: '#0f172a',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition:
+                'transform 160ms ease, border-color 160ms ease, background-color 160ms ease',
+              transform: 'scale(1)',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.transform = 'scale(1.08)';
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            <span
+              style={{
+                fontFamily: 'Inter, sans-serif',
+                fontWeight: option.id === 'bold' ? 700 : 600,
+                fontSize: 16,
+                lineHeight: '16px',
+                ...option.style,
+              }}
+            >
+              {option.symbol}
+            </span>
+          </button>
+        );
+      })}
+    </>
   );
 }
 
@@ -889,15 +1135,17 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
     ctx.save();
     const placeholderColor =
       card.textColor === '#F9FAFB' ? 'rgba(249, 250, 251, 0.7)' : '#9ca3af';
-    ctx.fillStyle = card.isPlaceholder ? placeholderColor : card.textColor;
+    const textColor = card.isPlaceholder ? placeholderColor : card.textColor;
+    ctx.fillStyle = textColor;
     const layout = calculateCardTypography(
       ctx,
       card.text,
       width,
-      height
+      height,
+      card.formatting
     );
 
-    ctx.font = `600 ${layout.fontSize}px "Inter", sans-serif`;
+    ctx.font = createFontString(card.formatting, layout.fontSize);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -911,6 +1159,43 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
         x + width / 2,
         startY + index * layout.lineHeight
       );
+
+      if (card.formatting?.underline || card.formatting?.strikethrough) {
+        const metrics = ctx.measureText(line);
+        const contentWidth = metrics.width;
+        const startX = x + width / 2 - contentWidth / 2;
+        const endX = startX + contentWidth;
+        const ascent = metrics.actualBoundingBoxAscent ?? layout.fontSize * 0.8;
+        const descent = metrics.actualBoundingBoxDescent ?? layout.fontSize * 0.2;
+        const baseline =
+          startY +
+          index * layout.lineHeight -
+          (descent - ascent) / 2;
+
+        ctx.save();
+        ctx.strokeStyle = textColor;
+        ctx.lineWidth = Math.max(1, layout.fontSize * 0.06);
+        ctx.lineCap = 'round';
+
+        if (card.formatting?.underline) {
+          const underlineOffset = Math.max(1, layout.fontSize * 0.08);
+          const underlineY = baseline + descent + underlineOffset;
+          ctx.beginPath();
+          ctx.moveTo(startX, underlineY);
+          ctx.lineTo(endX, underlineY);
+          ctx.stroke();
+        }
+
+        if (card.formatting?.strikethrough) {
+          const strikeY = baseline - ascent * 0.35;
+          ctx.beginPath();
+          ctx.moveTo(startX, strikeY);
+          ctx.lineTo(endX, strikeY);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
     });
 
     ctx.restore();
@@ -936,13 +1221,14 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
   ctx.restore();
 }
 
-function calculateCardTypography(ctx, text, width, height) {
+function calculateCardTypography(ctx, text, width, height, formatting) {
   const originalFont = ctx.font;
   const maxWidth = Math.max(1, width - CARD_TEXT_INSET * 2);
   const maxHeight = Math.max(1, height - CARD_TEXT_INSET * 2);
   const content = text && text.trim().length > 0 ? text : 'Card';
+  const resolvedFormatting = ensureFormatting(formatting);
 
-  ctx.font = `600 ${CARD_TEXT_MAX_FONT_SIZE}px "Inter", sans-serif`;
+  ctx.font = createFontString(resolvedFormatting, CARD_TEXT_MAX_FONT_SIZE);
   const initialLines = wrapCardLines(ctx, content, maxWidth);
   const initialTarget = CARD_TEXT_MAX_FONT_SIZE -
     Math.max(0, initialLines.length - 1) * CARD_TEXT_SHRINK_PER_LINE;
@@ -959,7 +1245,7 @@ function calculateCardTypography(ctx, text, width, height) {
   let fitsWithin = totalHeight <= maxHeight;
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    ctx.font = `600 ${fontSize}px "Inter", sans-serif`;
+    ctx.font = createFontString(resolvedFormatting, fontSize);
     lines = wrapCardLines(ctx, content, maxWidth);
     lineHeight = fontSize * CARD_TEXT_LINE_HEIGHT_MULTIPLIER;
     totalHeight = lines.length * lineHeight;
