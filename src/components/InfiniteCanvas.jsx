@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import PillNavigation from './PillNavigation.jsx';
+import UndoRedoPill from './UndoRedoPill.jsx';
 
 const COLOR_OPTIONS = [
   { id: 'white', label: 'White', color: '#FFFFFF', textColor: '#111827' },
@@ -79,6 +80,10 @@ export default function InfiniteCanvas() {
   const [interactionType, setInteractionType] = useState('idle');
   const [editingPadding, setEditingPadding] = useState(0);
   const [handleAnimationVersion, setHandleAnimationVersion] = useState(0);
+  const [historyStatus, setHistoryStatus] = useState({
+    canUndo: false,
+    canRedo: false,
+  });
 
   const cardsRef = useRef(cards);
   const panRef = useRef(pan);
@@ -88,6 +93,12 @@ export default function InfiniteCanvas() {
   const handleAnimationRef = useRef(null);
   const measurementContextRef = useRef(null);
   const clipboardRef = useRef(null);
+  const historyRef = useRef({ past: [], future: [] });
+  const editingSnapshotRef = useRef(false);
+  const activeCardIdRef = useRef(activeCardId);
+  const selectedCardIdsRef = useRef(selectedCardIds);
+  const editingCardIdRef = useRef(editingCardId);
+  const hoveredCardIdRef = useRef(hoveredCardId);
 
   const getMeasurementContext = useCallback(() => {
     if (typeof document === 'undefined') {
@@ -115,10 +126,125 @@ export default function InfiniteCanvas() {
   }, [scale]);
 
   useEffect(() => {
+    activeCardIdRef.current = activeCardId;
+  }, [activeCardId]);
+
+  useEffect(() => {
+    selectedCardIdsRef.current = selectedCardIds;
+  }, [selectedCardIds]);
+
+  useEffect(() => {
+    editingCardIdRef.current = editingCardId;
+    editingSnapshotRef.current = false;
+  }, [editingCardId]);
+
+  useEffect(() => {
+    hoveredCardIdRef.current = hoveredCardId;
+  }, [hoveredCardId]);
+
+  useEffect(() => {
     if (spaceHeld) {
       setHoveredCardId(null);
     }
   }, [spaceHeld]);
+
+  const syncHistoryStatus = useCallback(() => {
+    const { past, future } = historyRef.current;
+    setHistoryStatus((prev) => {
+      const next = {
+        canUndo: past.length > 0,
+        canRedo: future.length > 0,
+      };
+
+      if (prev.canUndo === next.canUndo && prev.canRedo === next.canRedo) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    syncHistoryStatus();
+  }, [syncHistoryStatus]);
+
+  const getSnapshot = useCallback(() => ({
+    cards: cardsRef.current.map((card) => ({ ...card })),
+    pan: { ...panRef.current },
+    scale: scaleRef.current,
+    activeCardId: activeCardIdRef.current,
+    selectedCardIds: [...(selectedCardIdsRef.current ?? [])],
+    editingCardId: editingCardIdRef.current,
+    hoveredCardId: hoveredCardIdRef.current,
+  }), []);
+
+  const applySnapshot = useCallback(
+    (snapshot) => {
+      if (!snapshot) {
+        return;
+      }
+
+      setCards(snapshot.cards ? snapshot.cards.map((card) => ({ ...card })) : []);
+      setPan(snapshot.pan ? { ...snapshot.pan } : { x: 0, y: 0 });
+      setScale(snapshot.scale ?? 1);
+      setActiveCardId(snapshot.activeCardId ?? null);
+      setSelectedCardIds(snapshot.selectedCardIds ? [...snapshot.selectedCardIds] : []);
+      setEditingCardId(snapshot.editingCardId ?? null);
+      setHoveredCardId(snapshot.hoveredCardId ?? null);
+      interactionRef.current = { type: 'idle' };
+      setInteractionType('idle');
+    },
+    []
+  );
+
+  const recordSnapshot = useCallback(() => {
+    const snapshot = getSnapshot();
+    const history = historyRef.current;
+    history.past.push(snapshot);
+
+    if (history.past.length > 200) {
+      history.past.shift();
+    }
+
+    history.future = [];
+    syncHistoryStatus();
+  }, [getSnapshot, syncHistoryStatus]);
+
+  const undo = useCallback(() => {
+    const history = historyRef.current;
+    if (history.past.length === 0) {
+      return;
+    }
+
+    const snapshot = history.past.pop();
+    history.future.push(getSnapshot());
+    applySnapshot(snapshot);
+    syncHistoryStatus();
+  }, [applySnapshot, getSnapshot, syncHistoryStatus]);
+
+  const redo = useCallback(() => {
+    const history = historyRef.current;
+    if (history.future.length === 0) {
+      return;
+    }
+
+    const snapshot = history.future.pop();
+    history.past.push(getSnapshot());
+    applySnapshot(snapshot);
+    syncHistoryStatus();
+  }, [applySnapshot, getSnapshot, syncHistoryStatus]);
+
+  const prepareHistoryForInteraction = useCallback(() => {
+    const interaction = interactionRef.current;
+    if (!interaction || interaction.type === 'idle') {
+      return;
+    }
+
+    if (!interaction.hasSnapshot) {
+      recordSnapshot();
+      interactionRef.current = { ...interaction, hasSnapshot: true };
+    }
+  }, [recordSnapshot]);
 
   const addCard = useCallback(() => {
     const canvas = canvasRef.current;
@@ -134,10 +260,11 @@ export default function InfiniteCanvas() {
       y: viewportCenter.y - DEFAULT_CARD.height / 2,
     });
 
+    recordSnapshot();
     setCards((prev) => [...prev, newCard]);
     setActiveCardId(newCard.id);
     setSelectedCardIds([newCard.id]);
-  }, []);
+  }, [recordSnapshot]);
 
   const duplicateSelectedCards = useCallback(() => {
     if (selectedCardIds.length === 0) {
@@ -161,6 +288,7 @@ export default function InfiniteCanvas() {
       isPlaceholder: card.text.trim().length === 0,
     }));
 
+    recordSnapshot();
     setCards((prev) => [...prev, ...duplicates]);
 
     const newIds = duplicates.map((card) => card.id);
@@ -168,7 +296,7 @@ export default function InfiniteCanvas() {
     setActiveCardId(newIds[newIds.length - 1] ?? null);
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
-  }, [selectedCardIds]);
+  }, [recordSnapshot, selectedCardIds]);
 
   const copySelectedCards = useCallback(() => {
     if (selectedCardIds.length === 0) {
@@ -204,6 +332,7 @@ export default function InfiniteCanvas() {
       isPlaceholder: card.text.trim().length === 0,
     }));
 
+    recordSnapshot();
     setCards((prev) => [...prev, ...pastedCards]);
 
     clipboardRef.current = pastedCards.map(({ id, ...rest }) => ({ ...rest }));
@@ -213,7 +342,7 @@ export default function InfiniteCanvas() {
     setActiveCardId(newIds[newIds.length - 1] ?? null);
     setEditingCardId(null);
     setHoveredCardId(newIds[newIds.length - 1] ?? null);
-  }, []);
+  }, [recordSnapshot]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -223,6 +352,16 @@ export default function InfiniteCanvas() {
       }
 
       if (editingCardId !== null) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
         event.preventDefault();
@@ -253,6 +392,7 @@ export default function InfiniteCanvas() {
         selectedCardIds.length > 0
       ) {
         event.preventDefault();
+        recordSnapshot();
         const idsToRemove = new Set(selectedCardIds);
         setCards((prev) => prev.filter((card) => !idsToRemove.has(card.id)));
         setSelectedCardIds([]);
@@ -286,7 +426,10 @@ export default function InfiniteCanvas() {
     duplicateSelectedCards,
     editingCardId,
     pasteCopiedCards,
+    recordSnapshot,
+    redo,
     selectedCardIds,
+    undo,
   ]);
 
   const toWorldSpace = useCallback((event) => {
@@ -332,6 +475,7 @@ export default function InfiniteCanvas() {
           pointerId: event.pointerId,
           origin: { x: event.clientX, y: event.clientY },
           start: { ...panRef.current },
+          hasSnapshot: false,
         });
         return;
       }
@@ -412,6 +556,7 @@ export default function InfiniteCanvas() {
           cardId: card.id,
           startPointer: pointer,
           startSize: { width: card.width, height: card.height },
+          hasSnapshot: false,
         });
         return;
       }
@@ -421,6 +566,7 @@ export default function InfiniteCanvas() {
         pointerId: event.pointerId,
         cardId: card.id,
         offset: { x: pointer.x - card.x, y: pointer.y - card.y },
+        hasSnapshot: false,
       });
     },
     [editingCardId, findCardAtPoint, setInteraction, spaceHeld, toWorldSpace]
@@ -447,6 +593,7 @@ export default function InfiniteCanvas() {
       if (interaction.type === 'pan') {
         const deltaX = event.clientX - interaction.origin.x;
         const deltaY = event.clientY - interaction.origin.y;
+        prepareHistoryForInteraction();
         setPan({
           x: interaction.start.x + deltaX,
           y: interaction.start.y + deltaY,
@@ -455,6 +602,7 @@ export default function InfiniteCanvas() {
       }
 
       if (interaction.type === 'drag') {
+        prepareHistoryForInteraction();
         setCards((prev) =>
           prev.map((card) =>
             card.id === interaction.cardId
@@ -470,6 +618,7 @@ export default function InfiniteCanvas() {
       }
 
       if (interaction.type === 'resize') {
+        prepareHistoryForInteraction();
         setCards((prev) =>
           prev.map((card) =>
             card.id === interaction.cardId
@@ -515,7 +664,7 @@ export default function InfiniteCanvas() {
         );
       }
     },
-    [findCardAtPoint, spaceHeld, toWorldSpace]
+    [findCardAtPoint, prepareHistoryForInteraction, spaceHeld, toWorldSpace]
   );
 
   const clearInteraction = useCallback(() => {
@@ -571,10 +720,11 @@ export default function InfiniteCanvas() {
         y: event.clientY - rect.top - pointerY * nextScale,
       };
 
+      recordSnapshot();
       setPan(newPan);
       setScale(nextScale);
     },
-    []
+    [recordSnapshot]
   );
 
   const editingCard = useMemo(
@@ -690,6 +840,11 @@ export default function InfiniteCanvas() {
       const value = event.target.value;
       const ctx = getMeasurementContext();
 
+      if (!editingSnapshotRef.current) {
+        recordSnapshot();
+        editingSnapshotRef.current = true;
+      }
+
       setCards((prev) =>
         prev.map((card) => {
           if (card.id !== editingCardId) {
@@ -735,22 +890,26 @@ export default function InfiniteCanvas() {
         })
       );
     },
-    [editingCardId, getMeasurementContext]
+    [editingCardId, getMeasurementContext, recordSnapshot]
   );
 
-  const handleCardColorChange = useCallback((cardId, option) => {
-    setCards((prev) =>
-      prev.map((card) =>
-        card.id === cardId
-          ? {
-              ...card,
-              color: option.color,
-              textColor: option.textColor,
-            }
-          : card
-      )
-    );
-  }, []);
+  const handleCardColorChange = useCallback(
+    (cardId, option) => {
+      recordSnapshot();
+      setCards((prev) =>
+        prev.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                color: option.color,
+                textColor: option.textColor,
+              }
+            : card
+        )
+      );
+    },
+    [recordSnapshot]
+  );
 
   const textareaPosition = useMemo(() => {
     if (!editingCard) return null;
@@ -889,6 +1048,13 @@ export default function InfiniteCanvas() {
               : 'default',
           touchAction: 'none',
         }}
+      />
+
+      <UndoRedoPill
+        canUndo={historyStatus.canUndo}
+        canRedo={historyStatus.canRedo}
+        onUndo={undo}
+        onRedo={redo}
       />
 
       {editingCard && textareaPosition && (
