@@ -70,6 +70,7 @@ export default function InfiniteCanvas() {
 
   const [cards, setCards] = useState([]);
   const [activeCardId, setActiveCardId] = useState(null);
+  const [selectedCardIds, setSelectedCardIds] = useState([]);
   const [editingCardId, setEditingCardId] = useState(null);
   const [hoveredCardId, setHoveredCardId] = useState(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -86,6 +87,7 @@ export default function InfiniteCanvas() {
   const handleVisibilityRef = useRef(new Map());
   const handleAnimationRef = useRef(null);
   const measurementContextRef = useRef(null);
+  const clipboardRef = useRef(null);
 
   const getMeasurementContext = useCallback(() => {
     if (typeof document === 'undefined') {
@@ -134,6 +136,83 @@ export default function InfiniteCanvas() {
 
     setCards((prev) => [...prev, newCard]);
     setActiveCardId(newCard.id);
+    setSelectedCardIds([newCard.id]);
+  }, []);
+
+  const duplicateSelectedCards = useCallback(() => {
+    if (selectedCardIds.length === 0) {
+      return;
+    }
+
+    const selectedCards = cardsRef.current.filter((card) =>
+      selectedCardIds.includes(card.id)
+    );
+
+    if (selectedCards.length === 0) {
+      return;
+    }
+
+    const offset = 24;
+    const duplicates = selectedCards.map((card) => ({
+      ...card,
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      x: card.x + offset,
+      y: card.y + offset,
+      isPlaceholder: card.text.trim().length === 0,
+    }));
+
+    setCards((prev) => [...prev, ...duplicates]);
+
+    const newIds = duplicates.map((card) => card.id);
+    setSelectedCardIds(newIds);
+    setActiveCardId(newIds[newIds.length - 1] ?? null);
+    setEditingCardId(null);
+    setHoveredCardId(newIds[newIds.length - 1] ?? null);
+  }, [selectedCardIds]);
+
+  const copySelectedCards = useCallback(() => {
+    if (selectedCardIds.length === 0) {
+      return;
+    }
+
+    const selectedCards = cardsRef.current.filter((card) =>
+      selectedCardIds.includes(card.id)
+    );
+
+    if (selectedCards.length === 0) {
+      return;
+    }
+
+    clipboardRef.current = selectedCards.map((card) => {
+      const { id, ...rest } = card;
+      return { ...rest };
+    });
+  }, [selectedCardIds]);
+
+  const pasteCopiedCards = useCallback(() => {
+    const clipboard = clipboardRef.current;
+    if (!clipboard || clipboard.length === 0) {
+      return;
+    }
+
+    const offset = 24;
+    const pastedCards = clipboard.map((card) => ({
+      ...card,
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      x: card.x + offset,
+      y: card.y + offset,
+      isPlaceholder: card.text.trim().length === 0,
+    }));
+
+    setCards((prev) => [...prev, ...pastedCards]);
+
+    clipboardRef.current = pastedCards.map(({ id, ...rest }) => ({ ...rest }));
+
+    const newIds = pastedCards.map((card) => card.id);
+    setSelectedCardIds(newIds);
+    setActiveCardId(newIds[newIds.length - 1] ?? null);
+    setEditingCardId(null);
+    setHoveredCardId(newIds[newIds.length - 1] ?? null);
   }, []);
 
   useEffect(() => {
@@ -145,16 +224,45 @@ export default function InfiniteCanvas() {
 
       if (editingCardId !== null) return;
 
-      if (event.key.toLowerCase() === 'c') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
         event.preventDefault();
-        addCard();
+        duplicateSelectedCards();
+        return;
       }
 
-      if (event.key === 'Backspace' && activeCardId) {
-        setCards((prev) => prev.filter((card) => card.id !== activeCardId));
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        copySelectedCards();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
+        event.preventDefault();
+        pasteCopiedCards();
+        return;
+      }
+
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        addCard();
+        return;
+      }
+
+      if (
+        (event.key === 'Backspace' || event.key === 'Delete') &&
+        selectedCardIds.length > 0
+      ) {
+        event.preventDefault();
+        const idsToRemove = new Set(selectedCardIds);
+        setCards((prev) => prev.filter((card) => !idsToRemove.has(card.id)));
+        setSelectedCardIds([]);
         setActiveCardId(null);
-        setEditingCardId((value) => (value === activeCardId ? null : value));
-        setHoveredCardId((value) => (value === activeCardId ? null : value));
+        setEditingCardId((value) =>
+          value && idsToRemove.has(value) ? null : value
+        );
+        setHoveredCardId((value) =>
+          value && idsToRemove.has(value) ? null : value
+        );
       }
     };
 
@@ -172,7 +280,14 @@ export default function InfiniteCanvas() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activeCardId, addCard, editingCardId]);
+  }, [
+    addCard,
+    copySelectedCards,
+    duplicateSelectedCards,
+    editingCardId,
+    pasteCopiedCards,
+    selectedCardIds,
+  ]);
 
   const toWorldSpace = useCallback((event) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -226,12 +341,47 @@ export default function InfiniteCanvas() {
 
       if (!card) {
         setActiveCardId(null);
+        setSelectedCardIds([]);
         setHoveredCardId(null);
         setInteraction({ type: 'idle' });
+        setEditingCardId(null);
         return;
       }
 
       setHoveredCardId(card.id);
+
+      if (event.shiftKey) {
+        setEditingCardId(null);
+        setSelectedCardIds((prev) => {
+          const alreadySelected = prev.includes(card.id);
+          const next = alreadySelected
+            ? prev.filter((id) => id !== card.id)
+            : [...prev, card.id];
+
+          setActiveCardId((prevActive) => {
+            if (!alreadySelected) {
+              return card.id;
+            }
+
+            if (prevActive === card.id) {
+              return next.length ? next[next.length - 1] : null;
+            }
+
+            if (next.includes(prevActive)) {
+              return prevActive;
+            }
+
+            return next.length ? next[next.length - 1] : null;
+          });
+
+          return next;
+        });
+
+        canvas.releasePointerCapture?.(event.pointerId);
+        setInteraction({ type: 'idle' });
+        return;
+      }
+
       const handleCenter = getHandleCenter(card);
       const distanceToHandle = Math.hypot(
         pointer.x - handleCenter.x,
@@ -239,6 +389,9 @@ export default function InfiniteCanvas() {
       );
 
       setActiveCardId(card.id);
+      setSelectedCardIds((prev) =>
+        prev.length === 1 && prev[0] === card.id ? prev : [card.id]
+      );
       setEditingCardId((value) => (value === card.id ? value : null));
 
       setCards((prev) => {
@@ -322,16 +475,40 @@ export default function InfiniteCanvas() {
             card.id === interaction.cardId
               ? {
                   ...card,
-                  width: clamp(
-                    interaction.startSize.width + (pointer.x - interaction.startPointer.x),
-                    MIN_CARD_WIDTH,
-                    Number.POSITIVE_INFINITY
-                  ),
-                  height: clamp(
-                    interaction.startSize.height + (pointer.y - interaction.startPointer.y),
-                    MIN_CARD_HEIGHT,
-                    MAX_CARD_HEIGHT
-                  ),
+                  ...(event.shiftKey
+                    ? (() => {
+                        const deltaX = pointer.x - interaction.startPointer.x;
+                        const deltaY = pointer.y - interaction.startPointer.y;
+                        const dominantDelta =
+                          Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY;
+
+                        return {
+                          width: clamp(
+                            interaction.startSize.width + dominantDelta,
+                            MIN_CARD_WIDTH,
+                            Number.POSITIVE_INFINITY
+                          ),
+                          height: clamp(
+                            interaction.startSize.height + dominantDelta,
+                            MIN_CARD_HEIGHT,
+                            MAX_CARD_HEIGHT
+                          ),
+                        };
+                      })()
+                    : {
+                        width: clamp(
+                          interaction.startSize.width +
+                            (pointer.x - interaction.startPointer.x),
+                          MIN_CARD_WIDTH,
+                          Number.POSITIVE_INFINITY
+                        ),
+                        height: clamp(
+                          interaction.startSize.height +
+                            (pointer.y - interaction.startPointer.y),
+                          MIN_CARD_HEIGHT,
+                          MAX_CARD_HEIGHT
+                        ),
+                      }),
                 }
               : card
           )
@@ -371,6 +548,7 @@ export default function InfiniteCanvas() {
 
       setActiveCardId(card.id);
       setHoveredCardId(card.id);
+      setSelectedCardIds([card.id]);
       setEditingCardId(card.id);
     },
     [findCardAtPoint, toWorldSpace]
@@ -470,6 +648,7 @@ export default function InfiniteCanvas() {
           isActive: card.id === activeCardId,
           isEditing: card.id === editingCardId,
           isHovered: card.id === hoveredCardId,
+          isSelected: selectedCardIds.includes(card.id),
           handleAlpha: handleVisibilityRef.current.get(card.id),
         });
       }
@@ -500,6 +679,7 @@ export default function InfiniteCanvas() {
     pan,
     scale,
     handleAnimationVersion,
+    selectedCardIds,
   ]);
 
   const handleTextChange = useCallback(
@@ -671,6 +851,8 @@ export default function InfiniteCanvas() {
     }
 
     setActiveCardId(null);
+    setSelectedCardIds([]);
+    setEditingCardId(null);
   }, [hoveredCardId, interactionType]);
 
   return (
@@ -851,7 +1033,11 @@ function drawGrid(ctx, rect, { pan, scale }) {
   ctx.restore();
 }
 
-function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
+function drawCard(
+  ctx,
+  card,
+  { isActive, isEditing, isHovered, handleAlpha, isSelected = false }
+) {
   const radius = 18;
   const { x, y, width, height } = card;
 
@@ -878,10 +1064,15 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
     ctx.shadowOffsetY = 16;
     ctx.fill();
     ctx.restore();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(37, 99, 235, 0.55)';
+    ctx.stroke();
   } else {
     ctx.fill();
-    ctx.strokeStyle = 'rgba(17, 17, 17, 0.12)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeStyle = isSelected
+      ? 'rgba(37, 99, 235, 0.4)'
+      : 'rgba(17, 17, 17, 0.12)';
     ctx.stroke();
   }
 
