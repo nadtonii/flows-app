@@ -273,6 +273,11 @@ export default function InfiniteCanvas() {
     }
   }, [recordSnapshot]);
 
+  const setInteraction = useCallback((interaction) => {
+    interactionRef.current = interaction;
+    setInteractionType(interaction.type);
+  }, []);
+
   const startConnectorCreation = useCallback(() => {
     if (editingCardIdRef.current !== null) {
       return;
@@ -632,11 +637,6 @@ export default function InfiniteCanvas() {
       x: (event.clientX - rect.left - panRef.current.x) / scaleRef.current,
       y: (event.clientY - rect.top - panRef.current.y) / scaleRef.current,
     };
-  }, []);
-
-  const setInteraction = useCallback((interaction) => {
-    interactionRef.current = interaction;
-    setInteractionType(interaction.type);
   }, []);
 
   const findCardAtPoint = useCallback((pointer) => {
