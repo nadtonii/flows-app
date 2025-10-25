@@ -1,6 +1,6 @@
 import NavigationPill from './NavigationPill.jsx';
 
-export default function PillNavigation({ onAddCard }) {
+export default function PillNavigation({ onAddCard, onAddArrow }) {
   return (
     <div
       style={{
@@ -13,7 +13,7 @@ export default function PillNavigation({ onAddCard }) {
       }}
     >
       <div style={{ pointerEvents: 'auto' }}>
-        <NavigationPill onAddCard={onAddCard} />
+        <NavigationPill onAddCard={onAddCard} onAddArrow={onAddArrow} />
       </div>
     </div>
   );

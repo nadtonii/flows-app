@@ -38,6 +38,9 @@ const HANDLE_RADIUS = HANDLE_SIZE / 2;
 const HANDLE_MARGIN = 6;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2.5;
+const CONNECTOR_CONTROL_OFFSET = 80;
+const CONNECTOR_HANDLE_RADIUS = 6;
+const CONNECTOR_ARROW_SIZE = 12;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -73,6 +76,11 @@ export default function InfiniteCanvas() {
   const [selectedCardIds, setSelectedCardIds] = useState([]);
   const [editingCardId, setEditingCardId] = useState(null);
   const [hoveredCardId, setHoveredCardId] = useState(null);
+  const [connectors, setConnectors] = useState([]);
+  const [selectedConnectorIds, setSelectedConnectorIds] = useState([]);
+  const [activeConnectorId, setActiveConnectorId] = useState(null);
+  const [hoveredConnectorId, setHoveredConnectorId] = useState(null);
+  const [draftConnector, setDraftConnector] = useState(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -83,6 +91,7 @@ export default function InfiniteCanvas() {
   const cardsRef = useRef(cards);
   const panRef = useRef(pan);
   const scaleRef = useRef(scale);
+  const connectorsRef = useRef(connectors);
   const textareaRef = useRef(null);
   const handleVisibilityRef = useRef(new Map());
   const handleAnimationRef = useRef(null);
@@ -107,12 +116,41 @@ export default function InfiniteCanvas() {
   }, [cards]);
 
   useEffect(() => {
+    connectorsRef.current = connectors;
+  }, [connectors]);
+
+  useEffect(() => {
     panRef.current = pan;
   }, [pan]);
 
   useEffect(() => {
     scaleRef.current = scale;
   }, [scale]);
+
+  const clearConnectorSelection = useCallback(() => {
+    setSelectedConnectorIds([]);
+    setActiveConnectorId(null);
+  }, []);
+
+  const enterConnectorMode = useCallback(() => {
+    setDraftConnector(null);
+    setHoveredConnectorId(null);
+    setInteraction({ type: 'connector-create-pending' });
+  }, [setInteraction]);
+
+  const exitConnectorMode = useCallback(() => {
+    setDraftConnector(null);
+    setHoveredConnectorId(null);
+    setInteraction({ type: 'idle' });
+  }, [setInteraction]);
+
+  const toggleConnectorMode = useCallback(() => {
+    if (interactionRef.current?.type?.startsWith('connector-create')) {
+      exitConnectorMode();
+    } else {
+      enterConnectorMode();
+    }
+  }, [enterConnectorMode, exitConnectorMode]);
 
   useEffect(() => {
     if (spaceHeld) {
@@ -163,6 +201,28 @@ export default function InfiniteCanvas() {
 
     setCards((prev) => [...prev, ...duplicates]);
 
+    const idMap = new Map(selectedCards.map((card, index) => [card.id, duplicates[index].id]));
+    const connectorsToDuplicate = connectorsRef.current.filter(
+      (connector) =>
+        idMap.has(connector.sourceId) &&
+        idMap.has(connector.targetId)
+    );
+
+    if (connectorsToDuplicate.length > 0) {
+      const duplicatedConnectors = connectorsToDuplicate.map((connector) => ({
+        ...connector,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        sourceId: idMap.get(connector.sourceId),
+        targetId: idMap.get(connector.targetId),
+      }));
+
+      setConnectors((prev) => [...prev, ...duplicatedConnectors]);
+      setSelectedConnectorIds(duplicatedConnectors.map((item) => item.id));
+      setActiveConnectorId(
+        duplicatedConnectors[duplicatedConnectors.length - 1]?.id ?? null
+      );
+    }
+
     const newIds = duplicates.map((card) => card.id);
     setSelectedCardIds(newIds);
     setActiveCardId(newIds[newIds.length - 1] ?? null);
@@ -183,30 +243,77 @@ export default function InfiniteCanvas() {
       return;
     }
 
-    clipboardRef.current = selectedCards.map((card) => {
-      const { id, ...rest } = card;
-      return { ...rest };
-    });
+    const connectorsToCopy = connectorsRef.current.filter(
+      (connector) =>
+        selectedCardIds.includes(connector.sourceId) &&
+        selectedCardIds.includes(connector.targetId)
+    );
+
+    clipboardRef.current = {
+      cards: selectedCards.map((card) => {
+        const { id, ...rest } = card;
+        return { originalId: card.id, data: { ...rest } };
+      }),
+      connectors: connectorsToCopy.map(({ id, ...rest }) => ({ ...rest })),
+    };
   }, [selectedCardIds]);
 
   const pasteCopiedCards = useCallback(() => {
     const clipboard = clipboardRef.current;
-    if (!clipboard || clipboard.length === 0) {
+    if (!clipboard || !Array.isArray(clipboard.cards) || clipboard.cards.length === 0) {
       return;
     }
 
     const offset = 24;
-    const pastedCards = clipboard.map((card) => ({
-      ...card,
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      x: card.x + offset,
-      y: card.y + offset,
-      isPlaceholder: card.text.trim().length === 0,
-    }));
+    const idMap = new Map();
+    const pastedCards = clipboard.cards.map(({ originalId, data }) => {
+      const card = {
+        ...data,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        x: data.x + offset,
+        y: data.y + offset,
+        isPlaceholder: data.text.trim().length === 0,
+      };
+      idMap.set(originalId, card.id);
+      return card;
+    });
 
     setCards((prev) => [...prev, ...pastedCards]);
 
-    clipboardRef.current = pastedCards.map(({ id, ...rest }) => ({ ...rest }));
+    const connectorCopies = Array.isArray(clipboard.connectors)
+      ? clipboard.connectors
+      : [];
+
+    let pastedConnectors = [];
+
+    if (connectorCopies.length > 0) {
+      pastedConnectors = connectorCopies
+        .filter(
+          (connector) => idMap.has(connector.sourceId) && idMap.has(connector.targetId)
+        )
+        .map((connector) => ({
+          ...connector,
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          sourceId: idMap.get(connector.sourceId),
+          targetId: idMap.get(connector.targetId),
+        }));
+
+      if (pastedConnectors.length > 0) {
+        setConnectors((prev) => [...prev, ...pastedConnectors]);
+        setSelectedConnectorIds(pastedConnectors.map((item) => item.id));
+        setActiveConnectorId(
+          pastedConnectors[pastedConnectors.length - 1]?.id ?? null
+        );
+      }
+    }
+
+    clipboardRef.current = {
+      cards: pastedCards.map(({ id, ...rest }) => ({
+        originalId: id,
+        data: { ...rest },
+      })),
+      connectors: pastedConnectors.map(({ id, ...rest }) => ({ ...rest })),
+    };
 
     const newIds = pastedCards.map((card) => card.id);
     setSelectedCardIds(newIds);
@@ -223,6 +330,20 @@ export default function InfiniteCanvas() {
       }
 
       if (editingCardId !== null) return;
+
+      if (event.key === 'Escape') {
+        if (interactionRef.current?.type?.startsWith('connector-create')) {
+          event.preventDefault();
+          exitConnectorMode();
+          return;
+        }
+
+        if (selectedConnectorIds.length > 0) {
+          event.preventDefault();
+          clearConnectorSelection();
+          return;
+        }
+      }
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
         event.preventDefault();
@@ -242,6 +363,12 @@ export default function InfiniteCanvas() {
         return;
       }
 
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        toggleConnectorMode();
+        return;
+      }
+
       if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'c') {
         event.preventDefault();
         addCard();
@@ -249,19 +376,33 @@ export default function InfiniteCanvas() {
       }
 
       if (
+        event.key &&
         (event.key === 'Backspace' || event.key === 'Delete') &&
-        selectedCardIds.length > 0
+        (selectedCardIds.length > 0 || selectedConnectorIds.length > 0)
       ) {
         event.preventDefault();
         const idsToRemove = new Set(selectedCardIds);
+        const connectorsToRemove = new Set(selectedConnectorIds);
         setCards((prev) => prev.filter((card) => !idsToRemove.has(card.id)));
+        setConnectors((prev) =>
+          prev.filter(
+            (connector) =>
+              !connectorsToRemove.has(connector.id) &&
+              !idsToRemove.has(connector.sourceId) &&
+              !idsToRemove.has(connector.targetId)
+          )
+        );
         setSelectedCardIds([]);
+        clearConnectorSelection();
         setActiveCardId(null);
         setEditingCardId((value) =>
           value && idsToRemove.has(value) ? null : value
         );
         setHoveredCardId((value) =>
           value && idsToRemove.has(value) ? null : value
+        );
+        setHoveredConnectorId((value) =>
+          value && connectorsToRemove.has(value) ? null : value
         );
       }
     };
@@ -285,8 +426,13 @@ export default function InfiniteCanvas() {
     copySelectedCards,
     duplicateSelectedCards,
     editingCardId,
+    enterConnectorMode,
+    exitConnectorMode,
     pasteCopiedCards,
+    clearConnectorSelection,
     selectedCardIds,
+    toggleConnectorMode,
+    selectedConnectorIds,
   ]);
 
   const toWorldSpace = useCallback((event) => {
@@ -337,12 +483,124 @@ export default function InfiniteCanvas() {
       }
 
       const pointer = toWorldSpace(event);
+
+      if (interactionRef.current?.type === 'connector-create-pending') {
+        const card = findCardAtPoint(pointer);
+        if (!card) {
+          exitConnectorMode();
+          return;
+        }
+
+        const anchor = getAnchorForPointer(card, pointer);
+        setDraftConnector({
+          sourceId: card.id,
+          sourceAnchor: anchor,
+          pointer,
+          targetCardId: null,
+          targetAnchor: null,
+        });
+        setInteraction({
+          type: 'connector-create-active',
+          pointerId: event.pointerId,
+          sourceCardId: card.id,
+          sourceAnchor: anchor,
+        });
+        return;
+      }
+
+      if (interactionRef.current?.type === 'connector-create-active') {
+        return;
+      }
+
+      const handleHit = findConnectorHandleAtPoint(
+        pointer,
+        connectorsRef.current,
+        cardsRef.current,
+        12 / scaleRef.current
+      );
+
+      if (handleHit) {
+        const connector = connectorsRef.current.find(
+          (item) => item.id === handleHit.connectorId
+        );
+
+        if (connector) {
+          setActiveConnectorId(connector.id);
+          setSelectedConnectorIds((prev) => {
+            if (prev.includes(connector.id)) {
+              return prev;
+            }
+            if (event.shiftKey) {
+              return [...prev, connector.id];
+            }
+            return [connector.id];
+          });
+          if (!event.shiftKey) {
+            setSelectedCardIds([]);
+            setActiveCardId(null);
+          }
+
+          setInteraction({
+            type: 'connector-adjust',
+            pointerId: event.pointerId,
+            connectorId: connector.id,
+            endpoint: handleHit.endpoint,
+            original: {
+              sourceId: connector.sourceId,
+              sourceAnchor: { ...connector.sourceAnchor },
+              targetId: connector.targetId,
+              targetAnchor: { ...connector.targetAnchor },
+            },
+            lastValid:
+              handleHit.endpoint === 'source'
+                ? {
+                    cardId: connector.sourceId,
+                    anchor: { ...connector.sourceAnchor },
+                  }
+                : {
+                    cardId: connector.targetId,
+                    anchor: { ...connector.targetAnchor },
+                  },
+          });
+          return;
+        }
+      }
+
+      const connectorHit = findConnectorAtPoint(
+        pointer,
+        connectorsRef.current,
+        cardsRef.current,
+        10 / scaleRef.current
+      );
+
+      if (connectorHit) {
+        if (!event.shiftKey) {
+          setSelectedCardIds([]);
+          setActiveCardId(null);
+          setSelectedConnectorIds([connectorHit.id]);
+        } else {
+          setSelectedConnectorIds((prev) => {
+            const already = prev.includes(connectorHit.id);
+            if (already) {
+              return prev;
+            }
+            return [...prev, connectorHit.id];
+          });
+        }
+        setActiveConnectorId(connectorHit.id);
+        setHoveredConnectorId(connectorHit.id);
+        canvas.releasePointerCapture?.(event.pointerId);
+        setInteraction({ type: 'idle' });
+        return;
+      }
+
       const card = findCardAtPoint(pointer);
 
       if (!card) {
         setActiveCardId(null);
         setSelectedCardIds([]);
         setHoveredCardId(null);
+        clearConnectorSelection();
         setInteraction({ type: 'idle' });
         setEditingCardId(null);
         return;
@@ -392,6 +650,7 @@ export default function InfiniteCanvas() {
       setSelectedCardIds((prev) =>
         prev.length === 1 && prev[0] === card.id ? prev : [card.id]
       );
+      clearConnectorSelection();
       setEditingCardId((value) => (value === card.id ? value : null));
 
       setCards((prev) => {
@@ -423,7 +682,15 @@ export default function InfiniteCanvas() {
         offset: { x: pointer.x - card.x, y: pointer.y - card.y },
       });
     },
-    [editingCardId, findCardAtPoint, setInteraction, spaceHeld, toWorldSpace]
+    [
+      clearConnectorSelection,
+      editingCardId,
+      exitConnectorMode,
+      findCardAtPoint,
+      setInteraction,
+      spaceHeld,
+      toWorldSpace,
+    ]
   );
 
   const handlePointerMove = useCallback(
@@ -438,9 +705,32 @@ export default function InfiniteCanvas() {
           const nextId = hoveredCard ? hoveredCard.id : null;
           return prev === nextId ? prev : nextId;
         });
+
+        const hoveredConnector = findConnectorAtPoint(
+          pointer,
+          connectorsRef.current,
+          cardsRef.current,
+          10 / scaleRef.current
+        );
+        setHoveredConnectorId((prev) => {
+          const nextId = hoveredConnector ? hoveredConnector.id : null;
+          return prev === nextId ? prev : nextId;
+        });
       }
 
       if (!interaction || interaction.type === 'idle') {
+        return;
+      }
+
+      if (interaction.type === 'connector-create-active') {
+        const targetCard = findCardAtPoint(pointer);
+        setDraftConnector({
+          sourceId: interaction.sourceCardId,
+          sourceAnchor: interaction.sourceAnchor,
+          pointer,
+          targetCardId: targetCard ? targetCard.id : null,
+          targetAnchor: targetCard ? getAnchorForPointer(targetCard, pointer) : null,
+        });
         return;
       }
 
@@ -451,6 +741,45 @@ export default function InfiniteCanvas() {
           x: interaction.start.x + deltaX,
           y: interaction.start.y + deltaY,
         });
+        return;
+      }
+
+      if (interaction.type === 'connector-adjust') {
+        const endpointId = interaction.endpoint === 'source' ? 'sourceId' : 'targetId';
+        const endpointAnchor =
+          interaction.endpoint === 'source' ? 'sourceAnchor' : 'targetAnchor';
+
+        const targetCard = findCardAtPoint(pointer);
+        let nextCardId = interaction.lastValid?.cardId ?? interaction.original[endpointId];
+        let nextAnchor = interaction.lastValid?.anchor ?? interaction.original[endpointAnchor];
+
+        if (targetCard) {
+          nextCardId = targetCard.id;
+          nextAnchor = getAnchorForPointer(targetCard, pointer);
+          interactionRef.current = {
+            ...interaction,
+            lastValid: { cardId: nextCardId, anchor: nextAnchor },
+          };
+        } else {
+          const fallbackCard = cardsRef.current.find(
+            (card) => card.id === nextCardId
+          );
+          if (fallbackCard) {
+            nextAnchor = getAnchorForPointer(fallbackCard, pointer);
+          }
+        }
+
+        setConnectors((prev) =>
+          prev.map((connector) =>
+            connector.id === interaction.connectorId
+              ? {
+                  ...connector,
+                  [endpointId]: nextCardId,
+                  [endpointAnchor]: nextAnchor,
+                }
+              : connector
+          )
+        );
         return;
       }
 
@@ -527,15 +856,76 @@ export default function InfiniteCanvas() {
       if (event?.pointerId != null) {
         canvasRef.current?.releasePointerCapture?.(event.pointerId);
       }
+
+      const interaction = interactionRef.current;
+
+      if (interaction?.type === 'connector-create-active') {
+        const pointer = toWorldSpace(event);
+        const targetCard = findCardAtPoint(pointer);
+
+        if (targetCard) {
+          const targetAnchor = getAnchorForPointer(targetCard, pointer);
+          const newConnector = {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            sourceId: interaction.sourceCardId,
+            targetId: targetCard.id,
+            sourceAnchor: interaction.sourceAnchor,
+            targetAnchor,
+          };
+          setConnectors((prev) => [...prev, newConnector]);
+          setSelectedConnectorIds([newConnector.id]);
+          setActiveConnectorId(newConnector.id);
+        }
+
+        setDraftConnector(null);
+        setInteraction({ type: 'connector-create-pending' });
+        return;
+      }
+
+      if (interaction?.type === 'connector-adjust') {
+        const pointer = toWorldSpace(event);
+        const targetCard = findCardAtPoint(pointer);
+
+        if (!targetCard) {
+          setConnectors((prev) =>
+            prev.map((connector) =>
+              connector.id === interaction.connectorId
+                ? {
+                    ...connector,
+                    sourceId: interaction.original.sourceId,
+                    sourceAnchor: { ...interaction.original.sourceAnchor },
+                    targetId: interaction.original.targetId,
+                    targetAnchor: { ...interaction.original.targetAnchor },
+                  }
+                : connector
+            )
+          );
+        }
+
+        setInteraction({ type: 'idle' });
+        return;
+      }
+
+      if (interaction?.type === 'connector-create-pending') {
+        setDraftConnector(null);
+        return;
+      }
+
       clearInteraction();
     },
-    [clearInteraction]
+    [
+      clearInteraction,
+      findCardAtPoint,
+      setInteraction,
+      toWorldSpace,
+    ]
   );
 
   const handlePointerLeave = useCallback(
     (event) => {
       handlePointerUp(event);
       setHoveredCardId(null);
+      setHoveredConnectorId(null);
     },
     [handlePointerUp]
   );
@@ -643,6 +1033,13 @@ export default function InfiniteCanvas() {
       ctx.translate(pan.x, pan.y);
       ctx.scale(scale, scale);
 
+      drawConnectors(ctx, cards, connectors, {
+        activeConnectorId,
+        hoveredConnectorId,
+        selectedConnectorIds,
+        draftConnector,
+      });
+
       for (const card of cards) {
         drawCard(ctx, card, {
           isActive: card.id === activeCardId,
@@ -676,10 +1073,15 @@ export default function InfiniteCanvas() {
     activeCardId,
     editingCardId,
     hoveredCardId,
+    activeConnectorId,
+    connectors,
+    draftConnector,
+    hoveredConnectorId,
     pan,
     scale,
     handleAnimationVersion,
     selectedCardIds,
+    selectedConnectorIds,
   ]);
 
   const handleTextChange = useCallback(
@@ -852,8 +1254,9 @@ export default function InfiniteCanvas() {
 
     setActiveCardId(null);
     setSelectedCardIds([]);
+    clearConnectorSelection();
     setEditingCardId(null);
-  }, [hoveredCardId, interactionType]);
+  }, [clearConnectorSelection, hoveredCardId, interactionType]);
 
   return (
     <div
@@ -883,6 +1286,10 @@ export default function InfiniteCanvas() {
               ? 'grab'
               : interactionType === 'pan'
               ? 'grabbing'
+              : interactionType?.startsWith?.('connector-create')
+              ? 'crosshair'
+              : interactionType === 'connector-adjust'
+              ? 'pointer'
               : 'default',
           touchAction: 'none',
         }}
@@ -995,7 +1402,7 @@ export default function InfiniteCanvas() {
         </div>
       )}
 
-      <PillNavigation onAddCard={addCard} />
+      <PillNavigation onAddCard={addCard} onAddArrow={toggleConnectorMode} />
     </div>
   );
 }
@@ -1031,6 +1438,356 @@ function drawGrid(ctx, rect, { pan, scale }) {
   }
 
   ctx.restore();
+}
+
+function drawConnectors(
+  ctx,
+  cards,
+  connectors,
+  { activeConnectorId, hoveredConnectorId, selectedConnectorIds, draftConnector }
+) {
+  const selectedSet = new Set(selectedConnectorIds);
+
+  for (const connector of connectors) {
+    const geometry = computeConnectorGeometry(connector, cards);
+    if (!geometry) continue;
+
+    const isSelected = selectedSet.has(connector.id);
+    const isActive = connector.id === activeConnectorId;
+    const isHovered = connector.id === hoveredConnectorId;
+
+    const stroke = isSelected || isActive
+      ? '#2563eb'
+      : isHovered
+      ? '#0ea5e9'
+      : '#1f2937';
+    const lineWidth = isSelected || isActive ? 3.5 : isHovered ? 3 : 2.5;
+
+    drawConnectorPath(ctx, geometry, {
+      stroke,
+      lineWidth,
+      showHandles: isSelected || isActive,
+    });
+  }
+
+  if (draftConnector) {
+    const draftGeometry = computeDraftConnectorGeometry(draftConnector, cards);
+    if (draftGeometry) {
+      drawConnectorPath(ctx, draftGeometry, {
+        stroke: 'rgba(37, 99, 235, 0.6)',
+        lineWidth: 2.5,
+        dashed: true,
+        showHandles: false,
+      });
+    }
+  }
+}
+
+function drawConnectorPath(ctx, geometry, { stroke, lineWidth, dashed = false, showHandles }) {
+  const { source, control1, control2, target } = geometry;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(source.x, source.y);
+  ctx.bezierCurveTo(control1.x, control1.y, control2.x, control2.y, target.x, target.y);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = stroke;
+  if (dashed) {
+    ctx.setLineDash([10, 8]);
+  }
+  ctx.stroke();
+  if (dashed) {
+    ctx.setLineDash([]);
+  }
+
+  drawArrowhead(ctx, control2, target, stroke);
+
+  if (showHandles) {
+    drawConnectorHandle(ctx, source);
+    drawConnectorHandle(ctx, target);
+  }
+
+  ctx.restore();
+}
+
+function drawConnectorHandle(ctx, point) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, CONNECTOR_HANDLE_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#2563eb';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawArrowhead(ctx, control, target, color) {
+  const dx = target.x - control.x;
+  const dy = target.y - control.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const ux = dx / length;
+  const uy = dy / length;
+
+  const angle = Math.PI / 6;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  const leftX = ux * cos - uy * sin;
+  const leftY = ux * sin + uy * cos;
+  const rightX = ux * cos + uy * sin;
+  const rightY = uy * cos - ux * sin;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(target.x, target.y);
+  ctx.lineTo(target.x - leftX * CONNECTOR_ARROW_SIZE, target.y - leftY * CONNECTOR_ARROW_SIZE);
+  ctx.lineTo(target.x - rightX * CONNECTOR_ARROW_SIZE, target.y - rightY * CONNECTOR_ARROW_SIZE);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function computeConnectorGeometry(connector, cards) {
+  const sourceCard = cards.find((card) => card.id === connector.sourceId);
+  const targetCard = cards.find((card) => card.id === connector.targetId);
+
+  if (!sourceCard || !targetCard) {
+    return null;
+  }
+
+  const sourceAnchor = ensureAnchor(connector.sourceAnchor);
+  const targetAnchor = ensureAnchor(connector.targetAnchor);
+
+  const sourcePoint = getAnchorPoint(sourceCard, sourceAnchor);
+  const targetPoint = getAnchorPoint(targetCard, targetAnchor);
+
+  const distance = Math.hypot(targetPoint.x - sourcePoint.x, targetPoint.y - sourcePoint.y);
+  const offset = Math.max(CONNECTOR_CONTROL_OFFSET, distance * 0.35);
+
+  const sourceNormal = getAnchorNormal(sourceAnchor, sourcePoint, targetPoint);
+  const targetNormal = getAnchorNormal(targetAnchor, targetPoint, sourcePoint);
+
+  const control1 = {
+    x: sourcePoint.x + sourceNormal.x * offset,
+    y: sourcePoint.y + sourceNormal.y * offset,
+  };
+
+  const control2 = {
+    x: targetPoint.x - targetNormal.x * offset,
+    y: targetPoint.y - targetNormal.y * offset,
+  };
+
+  return { source: sourcePoint, control1, control2, target: targetPoint };
+}
+
+function computeDraftConnectorGeometry(draft, cards) {
+  const sourceCard = cards.find((card) => card.id === (draft.sourceId ?? draft.sourceCardId));
+  if (!sourceCard) {
+    return null;
+  }
+
+  const sourceAnchor = ensureAnchor(draft.sourceAnchor);
+  const sourcePoint = getAnchorPoint(sourceCard, sourceAnchor);
+
+  let targetPoint = draft.pointer ?? sourcePoint;
+  let targetAnchor = draft.targetAnchor ? ensureAnchor(draft.targetAnchor) : null;
+
+  if (draft.targetCardId && draft.targetAnchor) {
+    const targetCard = cards.find((card) => card.id === draft.targetCardId);
+    if (targetCard) {
+      targetPoint = getAnchorPoint(targetCard, targetAnchor);
+    }
+  }
+
+  const distance = Math.hypot(targetPoint.x - sourcePoint.x, targetPoint.y - sourcePoint.y);
+  const offset = Math.max(CONNECTOR_CONTROL_OFFSET, distance * 0.35);
+
+  const sourceNormal = getAnchorNormal(sourceAnchor, sourcePoint, targetPoint);
+  const targetNormal = targetAnchor
+    ? getAnchorNormal(targetAnchor, targetPoint, sourcePoint)
+    : {
+        x: (targetPoint.x - sourcePoint.x) / (distance || 1),
+        y: (targetPoint.y - sourcePoint.y) / (distance || 1),
+      };
+
+  const control1 = {
+    x: sourcePoint.x + sourceNormal.x * offset,
+    y: sourcePoint.y + sourceNormal.y * offset,
+  };
+
+  const control2 = {
+    x: targetPoint.x - targetNormal.x * offset,
+    y: targetPoint.y - targetNormal.y * offset,
+  };
+
+  return { source: sourcePoint, control1, control2, target: targetPoint };
+}
+
+function getAnchorPoint(card, anchor) {
+  return {
+    x: card.x + clamp(anchor.x, 0, 1) * card.width,
+    y: card.y + clamp(anchor.y, 0, 1) * card.height,
+  };
+}
+
+function ensureAnchor(anchor) {
+  if (!anchor) {
+    return { x: 1, y: 0.5, side: 'right' };
+  }
+  if (anchor.side) {
+    return anchor;
+  }
+  const inferredSide = inferSideFromAnchor(anchor);
+  return { ...anchor, side: inferredSide };
+}
+
+function inferSideFromAnchor(anchor) {
+  const distances = [
+    { side: 'left', value: anchor.x },
+    { side: 'right', value: 1 - anchor.x },
+    { side: 'top', value: anchor.y },
+    { side: 'bottom', value: 1 - anchor.y },
+  ];
+
+  let best = distances[0];
+  for (let index = 1; index < distances.length; index += 1) {
+    if (distances[index].value < best.value) {
+      best = distances[index];
+    }
+  }
+
+  return best.side;
+}
+
+function getAnchorNormal(anchor, originPoint, targetPoint) {
+  const normals = {
+    top: { x: 0, y: -1 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
+
+  if (anchor?.side && normals[anchor.side]) {
+    return normals[anchor.side];
+  }
+
+  if (originPoint && targetPoint) {
+    const dx = targetPoint.x - originPoint.x;
+    const dy = targetPoint.y - originPoint.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
+
+  return { x: 1, y: 0 };
+}
+
+function getAnchorForPointer(card, pointer) {
+  const relativeX = clamp((pointer.x - card.x) / card.width, 0, 1);
+  const relativeY = clamp((pointer.y - card.y) / card.height, 0, 1);
+
+  const distances = [
+    { side: 'left', value: Math.abs(pointer.x - card.x) },
+    { side: 'right', value: Math.abs(pointer.x - (card.x + card.width)) },
+    { side: 'top', value: Math.abs(pointer.y - card.y) },
+    { side: 'bottom', value: Math.abs(pointer.y - (card.y + card.height)) },
+  ];
+
+  let closest = distances[0];
+  for (let index = 1; index < distances.length; index += 1) {
+    if (distances[index].value < closest.value) {
+      closest = distances[index];
+    }
+  }
+
+  switch (closest.side) {
+    case 'top':
+      return { x: relativeX, y: 0, side: 'top' };
+    case 'bottom':
+      return { x: relativeX, y: 1, side: 'bottom' };
+    case 'left':
+      return { x: 0, y: relativeY, side: 'left' };
+    default:
+      return { x: 1, y: relativeY, side: 'right' };
+  }
+}
+
+function getPointOnCubicBezier(p0, p1, p2, p3, t) {
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const t2 = t * t;
+
+  const x =
+    mt2 * mt * p0.x +
+    3 * mt2 * t * p1.x +
+    3 * mt * t2 * p2.x +
+    t2 * t * p3.x;
+  const y =
+    mt2 * mt * p0.y +
+    3 * mt2 * t * p1.y +
+    3 * mt * t2 * p2.y +
+    t2 * t * p3.y;
+
+  return { x, y };
+}
+
+function distancePointToBezier(point, geometry) {
+  const samples = 32;
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const sample = getPointOnCubicBezier(
+      geometry.source,
+      geometry.control1,
+      geometry.control2,
+      geometry.target,
+      t
+    );
+    const distance = Math.hypot(point.x - sample.x, point.y - sample.y);
+    if (distance < minDistance) {
+      minDistance = distance;
+    }
+  }
+
+  return minDistance;
+}
+
+function findConnectorAtPoint(pointer, connectors, cards, tolerance) {
+  let closest = null;
+  let closestDistance = tolerance;
+
+  for (const connector of connectors) {
+    const geometry = computeConnectorGeometry(connector, cards);
+    if (!geometry) continue;
+    const distance = distancePointToBezier(pointer, geometry);
+    if (distance <= closestDistance) {
+      closestDistance = distance;
+      closest = connector;
+    }
+  }
+
+  return closest;
+}
+
+function findConnectorHandleAtPoint(pointer, connectors, cards, tolerance) {
+  for (const connector of connectors) {
+    const geometry = computeConnectorGeometry(connector, cards);
+    if (!geometry) continue;
+
+    if (Math.hypot(pointer.x - geometry.source.x, pointer.y - geometry.source.y) <= tolerance) {
+      return { connectorId: connector.id, endpoint: 'source' };
+    }
+
+    if (Math.hypot(pointer.x - geometry.target.x, pointer.y - geometry.target.y) <= tolerance) {
+      return { connectorId: connector.id, endpoint: 'target' };
+    }
+  }
+
+  return null;
 }
 
 function drawCard(
