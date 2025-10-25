@@ -1232,6 +1232,12 @@ function drawCard(
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
 
+  const shouldHighlightSelection = isSelected && selectedCount > 1;
+  const strokeWidth = shouldHighlightSelection ? 2 : 1;
+  const strokeColor = shouldHighlightSelection
+    ? 'rgba(37, 99, 235, 0.4)'
+    : 'rgba(17, 17, 17, 0.12)';
+
   if (isActive) {
     ctx.save();
     ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
@@ -1240,18 +1246,13 @@ function drawCard(
     ctx.shadowOffsetY = 16;
     ctx.fill();
     ctx.restore();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(37, 99, 235, 0.55)';
-    ctx.stroke();
   } else {
     ctx.fill();
-    const shouldHighlightSelection = isSelected && selectedCount > 1;
-    ctx.lineWidth = shouldHighlightSelection ? 2 : 1;
-    ctx.strokeStyle = shouldHighlightSelection
-      ? 'rgba(37, 99, 235, 0.4)'
-      : 'rgba(17, 17, 17, 0.12)';
-    ctx.stroke();
   }
+
+  ctx.lineWidth = strokeWidth;
+  ctx.strokeStyle = strokeColor;
+  ctx.stroke();
 
   if (!isEditing) {
     ctx.save();
