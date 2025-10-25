@@ -43,10 +43,7 @@ const CONNECTOR_HANDLE_RADIUS = 12;
 const CONNECTOR_LINE_WIDTH = 3;
 const CONNECTOR_SELECTED_LINE_WIDTH = 4.5;
 const CONNECTOR_HIT_DISTANCE = 16;
-const CONNECTOR_START_CAP_RADIUS = 6;
-const CONNECTOR_ARROW_TIP_RADIUS = 8;
-const CONNECTOR_ARROW_LENGTH = 32;
-const CONNECTOR_ARROW_BASE_WIDTH = 18;
+const CONNECTOR_CAP_RADIUS = 6;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -803,6 +800,17 @@ export default function InfiniteCanvas() {
               : { x: 0, y: 0 },
             hasSnapshot: false,
           });
+        } else if (connectorHit.type === 'segment') {
+          const initial = cloneConnector(connectorHit.connector);
+          setDraftConnector(null);
+          setInteraction({
+            type: 'connector-move',
+            pointerId: event.pointerId,
+            connectorId,
+            startPointer: pointer,
+            initial,
+            hasSnapshot: false,
+          });
         } else {
           setDraftConnector(null);
           setInteraction({ type: 'idle' });
@@ -1058,6 +1066,30 @@ export default function InfiniteCanvas() {
         return;
       }
 
+      if (interaction.type === 'connector-move') {
+        prepareHistoryForInteraction();
+        const reference =
+          interaction.initial ??
+          connectorsRef.current.find((item) => item.id === interaction.connectorId);
+        if (!reference) {
+          setDraftConnector(null);
+          return;
+        }
+
+        const delta = {
+          x: pointer.x - interaction.startPointer.x,
+          y: pointer.y - interaction.startPointer.y,
+        };
+
+        const translated = translateConnector(reference, delta);
+        if (translated) {
+          setDraftConnector({ ...translated, originId: interaction.connectorId });
+        } else {
+          setDraftConnector(null);
+        }
+        return;
+      }
+
       if (interaction.type === 'connector-bend') {
         prepareHistoryForInteraction();
         const connector = connectorsRef.current.find(
@@ -1169,6 +1201,33 @@ export default function InfiniteCanvas() {
         return;
       }
 
+      if (interaction?.type === 'connector-move') {
+        const pointer = toWorldSpace(event);
+        const reference =
+          interaction.initial ??
+          connectorsRef.current.find((item) => item.id === interaction.connectorId);
+
+        if (reference) {
+          const delta = {
+            x: pointer.x - interaction.startPointer.x,
+            y: pointer.y - interaction.startPointer.y,
+          };
+
+          const translated = translateConnector(reference, delta);
+          if (translated && connectorTranslationChanged(reference, translated)) {
+            prepareHistoryForInteraction();
+            setConnectors((prev) =>
+              prev.map((item) =>
+                item.id === interaction.connectorId ? translated : item
+              )
+            );
+          }
+        }
+
+        clearInteraction();
+        return;
+      }
+
       if (interaction?.type === 'connector-bend') {
         const pointer = toWorldSpace(event);
         const connector = connectorsRef.current.find(
@@ -1212,6 +1271,7 @@ export default function InfiniteCanvas() {
     [
       clearInteraction,
       findCardAtPoint,
+      prepareHistoryForInteraction,
       recordSnapshot,
       toWorldSpace,
     ]
@@ -1840,6 +1900,107 @@ function anchorsEqual(a, b) {
   return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001;
 }
 
+function translateConnector(connector, delta) {
+  if (!connector || !delta) {
+    return null;
+  }
+
+  const next = cloneConnector(connector);
+
+  next.source = translateConnectorEnd(next.source, delta);
+  next.target = translateConnectorEnd(next.target, delta);
+
+  if (Array.isArray(next.bends) && next.bends.length > 0) {
+    next.bends = next.bends.map((bend) => ({
+      x: bend.x + delta.x,
+      y: bend.y + delta.y,
+    }));
+  }
+
+  return next;
+}
+
+function translateConnectorEnd(end, delta) {
+  if (!end) {
+    return { cardId: null, anchor: null };
+  }
+
+  if (end.cardId) {
+    return {
+      cardId: end.cardId,
+      anchor: end.anchor ? { ...end.anchor } : null,
+    };
+  }
+
+  const absolute = end.absolute ?? { x: 0, y: 0 };
+
+  return {
+    cardId: null,
+    anchor: null,
+    absolute: {
+      x: absolute.x + delta.x,
+      y: absolute.y + delta.y,
+    },
+  };
+}
+
+function connectorTranslationChanged(original, translated) {
+  if (!original || !translated) {
+    return false;
+  }
+
+  if (connectorEndsDiffer(original.source, translated.source)) {
+    return true;
+  }
+
+  if (connectorEndsDiffer(original.target, translated.target)) {
+    return true;
+  }
+
+  const originalBends = Array.isArray(original.bends) ? original.bends : [];
+  const translatedBends = Array.isArray(translated.bends) ? translated.bends : [];
+
+  if (originalBends.length !== translatedBends.length) {
+    return true;
+  }
+
+  for (let index = 0; index < originalBends.length; index += 1) {
+    const sourceBend = originalBends[index];
+    const targetBend = translatedBends[index];
+    if (
+      !sourceBend ||
+      !targetBend ||
+      Math.abs(sourceBend.x - targetBend.x) > 0.01 ||
+      Math.abs(sourceBend.y - targetBend.y) > 0.01
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function connectorEndsDiffer(a, b) {
+  if (!a && !b) {
+    return false;
+  }
+
+  if (!a || !b) {
+    return true;
+  }
+
+  if (a.cardId || b.cardId) {
+    return (a.cardId ?? null) !== (b.cardId ?? null) || !anchorsEqual(a.anchor, b.anchor);
+  }
+
+  const source = a.absolute ?? { x: 0, y: 0 };
+  const target = b.absolute ?? { x: 0, y: 0 };
+
+  return (
+    Math.abs(source.x - target.x) > 0.01 || Math.abs(source.y - target.y) > 0.01
+  );
+}
+
 function resolveConnectorEndPosition(end, cardMap) {
   if (!end) {
     return { point: null, attached: false };
@@ -1991,15 +2152,9 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   }
   ctx.stroke();
 
-  const arrowColor = selected ? '#2563EB' : '#1F2937';
-  drawConnectorStartCap(ctx, points[0], arrowColor, effectiveScale);
-  drawRoundedArrowHead(
-    ctx,
-    points[points.length - 2],
-    points[points.length - 1],
-    arrowColor,
-    effectiveScale
-  );
+  const capColor = selected ? '#2563EB' : '#1F2937';
+  drawConnectorCap(ctx, points[0], capColor, effectiveScale);
+  drawConnectorCap(ctx, points[points.length - 1], capColor, effectiveScale);
 
   if (selected || isDraft) {
     ctx.fillStyle = selected ? '#2563EB' : '#1F2937';
@@ -2027,86 +2182,18 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   ctx.restore();
 }
 
-function drawConnectorStartCap(ctx, point, color, scale = 1) {
+function drawConnectorCap(ctx, point, color, scale = 1) {
   if (!point) {
     return;
   }
 
   const effectiveScale = Math.max(scale, 0.01);
-  const radius = CONNECTOR_START_CAP_RADIUS / effectiveScale;
+  const radius = CONNECTOR_CAP_RADIUS / effectiveScale;
 
   ctx.save();
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawRoundedArrowHead(ctx, from, to, color, scale = 1) {
-  if (!from || !to) {
-    return;
-  }
-
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0) {
-    return;
-  }
-
-  const effectiveScale = Math.max(scale, 0.01);
-  const tipRadius = CONNECTOR_ARROW_TIP_RADIUS / effectiveScale;
-  const maxArrowLength = CONNECTOR_ARROW_LENGTH / effectiveScale;
-  const arrowLength = Math.min(length, maxArrowLength);
-
-  if (arrowLength <= tipRadius * 1.1) {
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(to.x, to.y, tipRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    return;
-  }
-
-  const baseWidth = CONNECTOR_ARROW_BASE_WIDTH / effectiveScale;
-  const ux = dx / length;
-  const uy = dy / length;
-  const px = -uy;
-  const py = ux;
-
-  const baseCenter = {
-    x: to.x - ux * arrowLength,
-    y: to.y - uy * arrowLength,
-  };
-
-  const leftBase = {
-    x: baseCenter.x + px * (baseWidth / 2),
-    y: baseCenter.y + py * (baseWidth / 2),
-  };
-
-  const rightBase = {
-    x: baseCenter.x - px * (baseWidth / 2),
-    y: baseCenter.y - py * (baseWidth / 2),
-  };
-
-  const control = {
-    x: baseCenter.x - ux * Math.min(arrowLength * 0.2, tipRadius * 1.25),
-    y: baseCenter.y - uy * Math.min(arrowLength * 0.2, tipRadius * 1.25),
-  };
-
-  const angle = Math.atan2(dy, dx);
-
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(leftBase.x, leftBase.y);
-  ctx.lineTo(to.x - ux * tipRadius, to.y - uy * tipRadius);
-  ctx.arc(to.x, to.y, tipRadius, angle - Math.PI / 2, angle + Math.PI / 2);
-  ctx.lineTo(rightBase.x, rightBase.y);
-  ctx.quadraticCurveTo(control.x, control.y, leftBase.x, leftBase.y);
-  ctx.closePath();
   ctx.fill();
   ctx.restore();
 }
