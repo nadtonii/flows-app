@@ -45,6 +45,8 @@ const CONNECTOR_SELECTED_LINE_WIDTH = 4.5;
 const CONNECTOR_HIT_DISTANCE = 16;
 const CONNECTOR_CAP_RADIUS = 4;
 const CONNECTOR_CARD_OFFSET = 10;
+const CONNECTOR_AUTOROUTE_OFFSET = 48;
+const CONNECTOR_CORNER_RADIUS = 18;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1968,6 +1970,84 @@ function offsetPointFromCard(point, anchor) {
   };
 }
 
+function extendPoint(point, normal, distance) {
+  if (!point) {
+    return null;
+  }
+
+  if (!normal || (normal.x === 0 && normal.y === 0)) {
+    return { x: point.x, y: point.y };
+  }
+
+  return {
+    x: point.x + normal.x * distance,
+    y: point.y + normal.y * distance,
+  };
+}
+
+function pointsApproximatelyEqual(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001;
+}
+
+function pushPoint(points, point) {
+  if (!point) {
+    return;
+  }
+
+  if (points.length === 0 || !pointsApproximatelyEqual(points[points.length - 1], point)) {
+    points.push(point);
+  }
+}
+
+function buildOrthogonalConnectorPoints(start, end) {
+  if (!start?.point || !end?.point) {
+    return [];
+  }
+
+  const points = [];
+  pushPoint(points, start.point);
+
+  const startExtension = extendPoint(start.point, start.normal, CONNECTOR_AUTOROUTE_OFFSET);
+  const endExtension = extendPoint(end.point, end.normal, CONNECTOR_AUTOROUTE_OFFSET);
+
+  pushPoint(points, startExtension);
+
+  const candidateA = startExtension && endExtension
+    ? { x: startExtension.x, y: endExtension.y }
+    : null;
+  const candidateB = startExtension && endExtension
+    ? { x: endExtension.x, y: startExtension.y }
+    : null;
+
+  let corner = null;
+  if (candidateA && candidateB) {
+    const lengthA =
+      Math.abs(candidateA.x - startExtension.x) +
+      Math.abs(candidateA.y - startExtension.y) +
+      Math.abs(endExtension.x - candidateA.x) +
+      Math.abs(endExtension.y - candidateA.y);
+    const lengthB =
+      Math.abs(candidateB.x - startExtension.x) +
+      Math.abs(candidateB.y - startExtension.y) +
+      Math.abs(endExtension.x - candidateB.x) +
+      Math.abs(endExtension.y - candidateB.y);
+
+    corner = lengthB < lengthA ? candidateB : candidateA;
+  } else if (candidateA) {
+    corner = candidateA;
+  } else if (candidateB) {
+    corner = candidateB;
+  }
+
+  pushPoint(points, corner);
+  pushPoint(points, endExtension);
+  pushPoint(points, end.point);
+
+  return points;
+}
+
 function translateConnector(connector, delta) {
   if (!connector || !delta) {
     return null;
@@ -2079,7 +2159,7 @@ function getCardPlaceholder(card) {
 
 function resolveConnectorEndPosition(end, cardMap) {
   if (!end) {
-    return { point: null, attached: false };
+    return { point: null, attached: false, anchor: null, normal: null };
   }
 
   if (end.cardId && end.anchor) {
@@ -2090,23 +2170,38 @@ function resolveConnectorEndPosition(end, cardMap) {
         x: card.x + card.width * anchor.x,
         y: card.y + card.height * anchor.y,
       };
+      const normal = getAnchorNormal(anchor);
       return {
         point: offsetPointFromCard(anchorPoint, anchor),
         attached: true,
+        anchor,
+        normal,
       };
     }
   }
 
   if (end.absolute) {
-    return { point: { ...end.absolute }, attached: false };
+    return { point: { ...end.absolute }, attached: false, anchor: null, normal: null };
   }
 
-  return { point: null, attached: false };
+  return { point: null, attached: false, anchor: null, normal: null };
 }
 
 function getConnectorGeometry(connector, cardMap) {
   const start = resolveConnectorEndPosition(connector?.source, cardMap);
   const end = resolveConnectorEndPosition(connector?.target, cardMap);
+  const autorouteEnabled =
+    start.attached &&
+    end.attached &&
+    (!Array.isArray(connector?.bends) || connector.bends.length === 0);
+
+  if (autorouteEnabled) {
+    const autorouted = buildOrthogonalConnectorPoints(start, end);
+    if (autorouted.length > 0) {
+      return { points: autorouted };
+    }
+  }
+
   const points = [];
 
   if (start.point) {
@@ -2125,7 +2220,7 @@ function getConnectorGeometry(connector, cardMap) {
     points.push(end.point);
   }
 
-  return { points, start, end };
+  return { points };
 }
 
 function findConnectorHit(pointer, connectors, cards, scale) {
@@ -2224,10 +2319,7 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
     (selected ? CONNECTOR_SELECTED_LINE_WIDTH : CONNECTOR_LINE_WIDTH) /
     effectiveScale;
   ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i += 1) {
-    ctx.lineTo(points[i].x, points[i].y);
-  }
+  drawRoundedPolylinePath(ctx, points, CONNECTOR_CORNER_RADIUS / effectiveScale);
   ctx.stroke();
 
   const capColor = selected ? '#2563EB' : '#1F2937';
@@ -2258,6 +2350,57 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   }
 
   ctx.restore();
+}
+
+function drawRoundedPolylinePath(ctx, points, radius) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return;
+  }
+
+  ctx.moveTo(points[0].x, points[0].y);
+
+  if (points.length === 2 || radius <= 0) {
+    ctx.lineTo(points[1].x, points[1].y);
+    return;
+  }
+
+  for (let i = 1; i < points.length; i += 1) {
+    const current = points[i];
+    const previous = points[i - 1];
+
+    if (i === points.length - 1) {
+      ctx.lineTo(current.x, current.y);
+      continue;
+    }
+
+    const next = points[i + 1];
+    const prevVector = { x: current.x - previous.x, y: current.y - previous.y };
+    const nextVector = { x: next.x - current.x, y: next.y - current.y };
+
+    const prevLength = Math.hypot(prevVector.x, prevVector.y);
+    const nextLength = Math.hypot(nextVector.x, nextVector.y);
+
+    if (prevLength === 0 || nextLength === 0) {
+      ctx.lineTo(current.x, current.y);
+      continue;
+    }
+
+    const prevDir = { x: prevVector.x / prevLength, y: prevVector.y / prevLength };
+    const nextDir = { x: nextVector.x / nextLength, y: nextVector.y / nextLength };
+    const cornerRadius = Math.min(radius, prevLength / 2, nextLength / 2);
+
+    const beforeCorner = {
+      x: current.x - prevDir.x * cornerRadius,
+      y: current.y - prevDir.y * cornerRadius,
+    };
+    const afterCorner = {
+      x: current.x + nextDir.x * cornerRadius,
+      y: current.y + nextDir.y * cornerRadius,
+    };
+
+    ctx.lineTo(beforeCorner.x, beforeCorner.y);
+    ctx.quadraticCurveTo(current.x, current.y, afterCorner.x, afterCorner.y);
+  }
 }
 
 function drawConnectorCap(ctx, point, color, scale = 1) {
