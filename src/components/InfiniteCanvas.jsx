@@ -643,12 +643,15 @@ export default function InfiniteCanvas() {
       ctx.translate(pan.x, pan.y);
       ctx.scale(scale, scale);
 
+      const selectedCount = selectedCardIds.length;
+
       for (const card of cards) {
         drawCard(ctx, card, {
-          isActive: card.id === activeCardId,
+          isActive: card.id === activeCardId && selectedCount <= 1,
           isEditing: card.id === editingCardId,
           isHovered: card.id === hoveredCardId,
           isSelected: selectedCardIds.includes(card.id),
+          selectedCount,
           handleAlpha: handleVisibilityRef.current.get(card.id),
         });
       }
@@ -938,7 +941,7 @@ export default function InfiniteCanvas() {
         />
       )}
 
-      {activeCard && toolbarPosition && (
+      {activeCard && toolbarPosition && selectedCardIds.length <= 1 && (
         <div
           style={{
             position: 'absolute',
@@ -1036,7 +1039,14 @@ function drawGrid(ctx, rect, { pan, scale }) {
 function drawCard(
   ctx,
   card,
-  { isActive, isEditing, isHovered, handleAlpha, isSelected = false }
+  {
+    isActive,
+    isEditing,
+    isHovered,
+    handleAlpha,
+    isSelected = false,
+    selectedCount = 0,
+  }
 ) {
   const radius = 18;
   const { x, y, width, height } = card;
@@ -1069,8 +1079,9 @@ function drawCard(
     ctx.stroke();
   } else {
     ctx.fill();
-    ctx.lineWidth = isSelected ? 2 : 1;
-    ctx.strokeStyle = isSelected
+    const shouldHighlightSelection = isSelected && selectedCount > 1;
+    ctx.lineWidth = shouldHighlightSelection ? 2 : 1;
+    ctx.strokeStyle = shouldHighlightSelection
       ? 'rgba(37, 99, 235, 0.4)'
       : 'rgba(17, 17, 17, 0.12)';
     ctx.stroke();
