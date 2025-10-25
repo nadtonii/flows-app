@@ -768,8 +768,7 @@ export default function InfiniteCanvas() {
             padding: '10px 16px',
             borderRadius: 9999,
             background: 'rgba(255, 255, 255, 0.96)',
-            boxShadow:
-              '0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.08)',
+            boxShadow: 'none',
             alignItems: 'center',
             zIndex: 20,
             border: '1px solid rgba(15, 23, 42, 0.08)',
@@ -858,8 +857,6 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
 
   ctx.save();
   ctx.fillStyle = card.color ?? '#ffffff';
-  ctx.strokeStyle = isActive ? '#111' : 'rgba(17, 17, 17, 0.12)';
-  ctx.lineWidth = isActive ? 2 : 1;
 
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -872,8 +869,21 @@ function drawCard(ctx, card, { isActive, isEditing, isHovered, handleAlpha }) {
   ctx.lineTo(x, y + radius);
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+
+  if (isActive) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+    ctx.shadowBlur = 32;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 16;
+    ctx.fill();
+    ctx.restore();
+  } else {
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(17, 17, 17, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 
   if (!isEditing) {
     ctx.save();
