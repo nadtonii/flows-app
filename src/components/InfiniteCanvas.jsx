@@ -1149,8 +1149,8 @@ export default function InfiniteCanvas() {
           cardMap.set(card.id, card);
         }
 
-        const start = resolveConnectorEndPosition(connector.source, cardMap);
-        const end = resolveConnectorEndPosition(connector.target, cardMap);
+        const start = resolveConnectorEndPosition(connector.source, cardMap, 'source');
+        const end = resolveConnectorEndPosition(connector.target, cardMap, 'target');
         if (!start.attached || !end.attached) {
           setDraftConnector(null);
           return;
@@ -1329,8 +1329,8 @@ export default function InfiniteCanvas() {
             cardMap.set(card.id, card);
           }
 
-          const start = resolveConnectorEndPosition(connector.source, cardMap);
-          const end = resolveConnectorEndPosition(connector.target, cardMap);
+          const start = resolveConnectorEndPosition(connector.source, cardMap, 'source');
+          const end = resolveConnectorEndPosition(connector.target, cardMap, 'target');
 
           if (start.attached && end.attached) {
             const offset = interaction.offset ?? { x: 0, y: 0 };
@@ -2114,11 +2114,11 @@ function getAnchorNormal(anchor) {
   return { x: normalX / length, y: normalY / length };
 }
 
-function offsetPointFromCard(point, anchor) {
+function offsetPointFromCard(point, anchor, distance = CONNECTOR_CARD_OFFSET) {
   const normal = getAnchorNormal(anchor);
   return {
-    x: point.x + normal.x * CONNECTOR_CARD_OFFSET,
-    y: point.y + normal.y * CONNECTOR_CARD_OFFSET,
+    x: point.x + normal.x * distance,
+    y: point.y + normal.y * distance,
   };
 }
 
@@ -2433,22 +2433,26 @@ function getCardPlaceholder(card) {
   return card.shape === 'diamond' ? 'Diamond' : 'Card';
 }
 
-function resolveConnectorEndPosition(end, cardMap) {
+function resolveConnectorEndPosition(end, cardMap, role = 'source') {
   if (!end) {
-    return { point: null, attached: false, anchor: null, normal: null };
+    return { point: null, surface: null, attached: false, anchor: null, normal: null };
   }
 
   if (end.cardId && end.anchor) {
     const card = cardMap.get(end.cardId);
     if (card) {
       const anchor = end.anchor;
-      const anchorPoint = {
+      const surface = {
         x: card.x + card.width * anchor.x,
         y: card.y + card.height * anchor.y,
       };
       const normal = getAnchorNormal(anchor);
+      const point =
+        role === 'target' ? surface : offsetPointFromCard(surface, anchor, CONNECTOR_CARD_OFFSET);
+
       return {
-        point: offsetPointFromCard(anchorPoint, anchor),
+        point,
+        surface,
         attached: true,
         anchor,
         normal,
@@ -2457,15 +2461,22 @@ function resolveConnectorEndPosition(end, cardMap) {
   }
 
   if (end.absolute) {
-    return { point: { ...end.absolute }, attached: false, anchor: null, normal: null };
+    const absolute = { ...end.absolute };
+    return {
+      point: absolute,
+      surface: absolute,
+      attached: false,
+      anchor: null,
+      normal: null,
+    };
   }
 
-  return { point: null, attached: false, anchor: null, normal: null };
+  return { point: null, surface: null, attached: false, anchor: null, normal: null };
 }
 
 function getConnectorGeometry(connector, cardMap) {
-  const start = resolveConnectorEndPosition(connector?.source, cardMap);
-  const end = resolveConnectorEndPosition(connector?.target, cardMap);
+  const start = resolveConnectorEndPosition(connector?.source, cardMap, 'source');
+  const end = resolveConnectorEndPosition(connector?.target, cardMap, 'target');
   const autorouteEnabled =
     start.attached &&
     end.attached &&
@@ -2474,7 +2485,7 @@ function getConnectorGeometry(connector, cardMap) {
   if (autorouteEnabled) {
     const autorouted = buildOrthogonalConnectorPoints(start, end, connector?.autoroute);
     if (autorouted.points.length > 0) {
-      return { points: autorouted.points, autoroute: autorouted.autoroute };
+      return { points: autorouted.points, autoroute: autorouted.autoroute, start, end };
     }
   }
 
@@ -2496,7 +2507,7 @@ function getConnectorGeometry(connector, cardMap) {
     points.push(end.point);
   }
 
-  return { points, autoroute: null };
+  return { points, autoroute: null, start, end };
 }
 
 function findConnectorHit(pointer, connectors, cards, scale) {
@@ -2525,19 +2536,18 @@ function findConnectorHit(pointer, connectors, cards, scale) {
       continue;
     }
 
-    const startPoint = points[0];
-    const endPoint = points[points.length - 1];
-
+    const startPoint = geometry.start?.surface ?? points[0];
     if (
-      Math.hypot(pointer.x - startPoint.x, pointer.y - startPoint.y) <=
-      handleRadius
+      startPoint &&
+      Math.hypot(pointer.x - startPoint.x, pointer.y - startPoint.y) <= handleRadius
     ) {
       return { type: 'endpoint', connector, endpoint: 'source' };
     }
 
+    const endPoint = geometry.end?.surface ?? points[points.length - 1];
     if (
-      Math.hypot(pointer.x - endPoint.x, pointer.y - endPoint.y) <=
-      handleRadius
+      endPoint &&
+      Math.hypot(pointer.x - endPoint.x, pointer.y - endPoint.y) <= handleRadius
     ) {
       return { type: 'endpoint', connector, endpoint: 'target' };
     }
@@ -2593,7 +2603,7 @@ function distanceToSegment(point, start, end) {
 
 function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = false }) {
   const geometry = getConnectorGeometry(connector, cardMap);
-  const { points } = geometry;
+  const { points, start, end } = geometry;
   if (points.length < 2) {
     return;
   }
@@ -2606,16 +2616,40 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
   ctx.lineWidth =
     (selected ? CONNECTOR_SELECTED_LINE_WIDTH : CONNECTOR_LINE_WIDTH) /
     effectiveScale;
+  const renderPoints = points.slice();
+  const arrowTip = end?.surface ?? renderPoints[renderPoints.length - 1];
+  let arrowFrom =
+    renderPoints.length >= 2 ? renderPoints[renderPoints.length - 2] : null;
+  if (arrowTip && arrowFrom) {
+    const dx = arrowTip.x - arrowFrom.x;
+    const dy = arrowTip.y - arrowFrom.y;
+    const segmentLength = Math.hypot(dx, dy);
+    if (segmentLength > 0) {
+      const effectiveArrowLength = Math.min(
+        segmentLength,
+        CONNECTOR_ARROW_LENGTH / effectiveScale
+      );
+      const arrowBase = {
+        x: arrowTip.x - (dx / segmentLength) * effectiveArrowLength,
+        y: arrowTip.y - (dy / segmentLength) * effectiveArrowLength,
+      };
+      renderPoints[renderPoints.length - 1] = arrowBase;
+      arrowFrom = arrowBase;
+    }
+  }
+
   ctx.beginPath();
-  drawRoundedPolylinePath(ctx, points, CONNECTOR_CORNER_RADIUS / effectiveScale);
+  drawRoundedPolylinePath(
+    ctx,
+    renderPoints,
+    CONNECTOR_CORNER_RADIUS / effectiveScale
+  );
   ctx.stroke();
 
   const capColor = selected ? '#2563EB' : '#1F2937';
-  drawConnectorStartCap(ctx, points[0], capColor, effectiveScale);
-  if (points.length >= 2) {
-    const tail = points[points.length - 2];
-    const tip = points[points.length - 1];
-    drawConnectorArrowCap(ctx, tail, tip, capColor, effectiveScale);
+  drawConnectorStartCap(ctx, start?.point ?? points[0], capColor, effectiveScale);
+  if (arrowTip && arrowFrom) {
+    drawConnectorArrowCap(ctx, arrowFrom, arrowTip, capColor, effectiveScale);
   }
 
   if (selected || isDraft) {
@@ -2623,7 +2657,7 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 1.5 / effectiveScale;
 
-    const handlePoints = [points[0]];
+    const handlePoints = [start?.point ?? points[0]];
     if (Array.isArray(connector.bends) && connector.bends.length > 0) {
       for (const bend of connector.bends) {
         if (bend && typeof bend.x === 'number' && typeof bend.y === 'number') {
@@ -2633,7 +2667,7 @@ function drawConnector(ctx, connector, { cardMap, selected, scale, isDraft = fal
     } else if (geometry.autoroute?.corner) {
       handlePoints.push(geometry.autoroute.corner);
     }
-    handlePoints.push(points[points.length - 1]);
+    handlePoints.push(end?.surface ?? points[points.length - 1]);
 
     for (let index = 0; index < handlePoints.length; index += 1) {
       const point = handlePoints[index];
@@ -2732,13 +2766,20 @@ function drawConnectorArrowCap(ctx, from, to, color, scale = 1) {
   }
 
   const effectiveScale = Math.max(scale, 0.01);
-  const arrowLength = CONNECTOR_ARROW_LENGTH / effectiveScale;
-  const arrowWidth = CONNECTOR_ARROW_WIDTH / effectiveScale;
+  const arrowLengthBase = CONNECTOR_ARROW_LENGTH / effectiveScale;
+  const arrowWidthBase = CONNECTOR_ARROW_WIDTH / effectiveScale;
 
   const ux = dx / length;
   const uy = dy / length;
   const px = -uy;
   const py = ux;
+
+  const arrowLength = Math.min(arrowLengthBase, length);
+  if (arrowLength <= 0) {
+    return;
+  }
+  const widthScale = arrowLengthBase > 0 ? arrowLength / arrowLengthBase : 1;
+  const arrowWidth = arrowWidthBase * widthScale;
 
   const tip = to;
   const base = {
